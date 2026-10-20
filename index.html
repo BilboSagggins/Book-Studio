@@ -733,16 +733,26 @@
               ctx.fillStyle = '#16100a';
               ctx.font = "110px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
               ctx.fillText(emoji, W / 2, 225);
+            } else if (opts.reserve) {                   // empty space kept for an illustration
+              ctx.fillStyle = 'rgba(205, 175, 120, 0.12)'; rr(50, 50, 412, 300, 18); ctx.fill();
+              ctx.save(); ctx.setLineDash([10, 8]); ctx.strokeStyle = 'rgba(150, 115, 60, 0.35)'; ctx.lineWidth = 2;
+              rr(50, 50, 412, 300, 18); ctx.stroke(); ctx.restore();
             }
           }
 
           // Story text
-          ctx.font = "700 27px 'Quicksand', sans-serif";
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          const lines = wrapLines(text, 400);
+          let y = (img || emoji || (opts.reserve && !full)) ? 380 : 110;   // pages with no picture use the whole page for words
+          // shrink the letters a little if the words would run past the bottom of the page
+          let size = 27, LH = 40, lines;
+          for (;;) {
+            ctx.font = `700 ${size}px 'Quicksand', sans-serif`;
+            lines = wrapLines(text, 400);
+            const room = full ? 99 : Math.floor((H - 78 - y) / LH) + 1;
+            if (lines.length <= room || size <= 18) break;
+            size -= 3; LH = Math.round(size * 1.45);
+          }
           const hasText = lines.some(l => l.length);
-          const LH = 40;
-          let y = (img || emoji) ? 380 : 110;   // pages with no picture use the whole page for words
           if (full) y = Math.max(70, H - 110 - (lines.length - 1) * LH);
 
           if (full && hasText && !direct) {            // plain panel behind the words
@@ -2080,34 +2090,47 @@
       // FRONT of the next sheet on the right. So for spread i to face itself, sheet i carries the
       // left page of spread i on its back and the right page of spread i-1 on its front.
       // Sheet 0's front is a title page; the last sheet's back is a closing page.
-      const pageTone = roomSettings.pageBrightness;
+      // Page pictures are only built for the sheets near the open spread (long books can have
+      // over a hundred pages, which would use too much memory on a phone).
+      const reserve = !!bookData.illustrationSpace;
       const pageMat = (tex) => {
         tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 8;
-        const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 1, metalness: 0, envMapIntensity: 0, color: new THREE.Color().setScalar(pageTone) });
+        const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 1, metalness: 0, envMapIntensity: 0, color: new THREE.Color().setScalar(roomSettings.pageBrightness) });
         pageMats.push(m); return m;
       };
-      const leftMats = [], rightMats = [];
-      bookData.pages.forEach((pageData, i) => {
-        leftMats.push(pageMat(TextureGenerator.createPageTexture(pageData.leftText, pageData.leftEmoji, (i * 2) + 1, false, { image: pageData.leftImage, layout: pageData.leftLayout, textBg: pageData.leftTextBg })));
-        rightMats.push(pageMat(TextureGenerator.createPageTexture(pageData.rightText, pageData.rightEmoji, (i * 2) + 2, true, { image: pageData.rightImage, layout: pageData.rightLayout, textBg: pageData.rightTextBg })));
-      });
-      const titleMat = pageMat(TextureGenerator.createTitlePageTexture(bookData));
-      const closingMat = pageMat(TextureGenerator.createTitlePageTexture(bookData, true));
+      const freeMat = (m) => {
+        if (!m || m === innerPaperMat) return;
+        if (m.map) m.map.dispose(); m.dispose();
+        const k = pageMats.indexOf(m); if (k >= 0) pageMats.splice(k, 1);
+      };
+      const leftTex = i => { const d = bookData.pages[i]; return TextureGenerator.createPageTexture(d.leftText, d.leftEmoji, i * 2 + 1, false, { image: d.leftImage, layout: d.leftLayout, textBg: d.leftTextBg, reserve }); };
+      const rightTex = i => { const d = bookData.pages[i]; return TextureGenerator.createPageTexture(d.rightText, d.rightEmoji, i * 2 + 2, true, { image: d.rightImage, layout: d.rightLayout, textBg: d.rightTextBg, reserve }); };
+      const frontTex = i => i === 0 ? TextureGenerator.createTitlePageTexture(bookData) : rightTex(i - 1);   // +z: seen on the right before turning
+      const backTex = i => i < numSpreads ? leftTex(i) : TextureGenerator.createTitlePageTexture(bookData, true); // -z: seen on the left after turning
 
+      const leafMeshes = [];
       for (let i = 0; i <= numSpreads; i++) {
         const pagePivot = new THREE.Group();
-        const front = i === 0 ? titleMat : rightMats[i - 1];          // +z: seen on the right before turning
-        const back = i < numSpreads ? leftMats[i] : closingMat;       // -z: seen on the left after turning
         const leafMesh = new THREE.Mesh(
           new THREE.BoxGeometry(BOOK_WIDTH - 0.05, BOOK_HEIGHT - 0.07, 0.008),
-          [innerPaperMat, innerPaperMat, innerPaperMat, innerPaperMat, front, back]
+          [innerPaperMat, innerPaperMat, innerPaperMat, innerPaperMat, innerPaperMat, innerPaperMat]
         );
         leafMesh.position.set(0.02 + (BOOK_WIDTH - 0.05) / 2, 0, 0);
         leafMesh.castShadow = true;
         pagePivot.add(leafMesh);
         bookGroup.add(pagePivot);
         pageLeaves.push(pagePivot);
+        leafMeshes.push(leafMesh);
       }
+      // Load page pictures for sheets within `radius` of `center`; free the rest (center = null frees all)
+      bookGroup.userData.setPageWindow = (center, radius = 2) => {
+        leafMeshes.forEach((lm, i) => {
+          const want = center !== null && Math.abs(i - center) <= radius;
+          const loaded = lm.material[4] !== innerPaperMat;
+          if (want && !loaded) { lm.material[4] = pageMat(frontTex(i)); lm.material[5] = pageMat(backTex(i)); }
+          else if (!want && loaded) { freeMat(lm.material[4]); freeMat(lm.material[5]); lm.material[4] = lm.material[5] = innerPaperMat; }
+        });
+      };
 
       // Store child components on group for easy GSAP target access
       bookGroup.userData.frontCoverPivot = frontCoverPivot;
@@ -2155,7 +2178,7 @@
     // Spawn Bookshelf items
     function populateBookshelf() {
       // Clear existing if any
-      interactiveBooks.forEach(b => scene.remove(b));
+      interactiveBooks.forEach(b => { if (b.userData.setPageWindow) b.userData.setPageWindow(null); scene.remove(b); });
       interactiveBooks.length = 0;
       pageMats.length = 0;
 
@@ -2212,6 +2235,7 @@
       currentActiveBook = bookGroup;
       isBookOnTable = true;
       bookGroup.userData.hitBox.raycast = () => {};
+      bookGroup.userData.setPageWindow(0);
 
       const data = bookGroup.userData.data;
       
@@ -2304,6 +2328,7 @@
         onComplete: () => {
           isAnimating = false;
           currentActiveBook.userData.hitBox.raycast = currentActiveBook.userData.hitBoxRaycast;
+          currentActiveBook.userData.setPageWindow(null);
           isBookOnTable = false;
           currentActiveBook = null;
           document.getElementById('reading-controls').classList.add('hidden');
@@ -2406,6 +2431,7 @@
 
       if (isBookOpen) {
         if (pb) pb.visible = false;
+        book.userData.setPageWindow(0);
         // Right stack (under the back cover's pages) appears at full size at once; the left stack stays hidden until a page is turned
         const rb = book.userData.rightBlock, lb = book.userData.leftBlock;
         rb.scale.z = 1; rb.position.z = -0.045 + 0.018; rb.visible = true;
@@ -2449,6 +2475,7 @@
       if (direction === 'next' && currentSpreadIndex < maxSpreads) {
         isAnimating = true;
         const targetLeaf = leaves[currentSpreadIndex];
+        currentActiveBook.userData.setPageWindow(currentSpreadIndex + 1);
         
         // Rotate page leaf around spine hinge to left side (-PI)
         layoutStacks(currentActiveBook, currentSpreadIndex + 1, 0.8);
@@ -2466,6 +2493,7 @@
         isAnimating = true;
         currentSpreadIndex--;
         const targetLeaf = leaves[currentSpreadIndex];
+        currentActiveBook.userData.setPageWindow(currentSpreadIndex);
         layoutStacks(currentActiveBook, currentSpreadIndex, 0.8);
 
         // Rotate page leaf back to right side (0)
@@ -3572,11 +3600,15 @@
         if (s >= 0) t = t.slice(t.indexOf('\n', s) + 1);
         const e = t.search(/\*\*\* ?END OF (THE|THIS) PROJECT GUTENBERG/i);
         if (e >= 0) t = t.slice(0, e);
+        t = t.replace(/\[\s*(illustration|frontispiece|picture|plate)s?\b[^\]]*\]/gi, '')   // [Illustration: ...] (can span lines)
+             .replace(/\{\s*(illustration|frontispiece)s?\b[^}]*\}/gi, '')
+             .replace(/^[ \t]*_?(full-page )?(illustrations?|frontispiece)[._:]*_?[ \t]*$/gim, '')    // lines that just say "Illustration"
+             .replace(/_([^_\n]+)_/g, '$1');                                          // _italics_
         return t.trim();
       }
 
       function toParagraphs(text) {
-        return text.split(/\n\s*\n/).map(p => {
+        return text.split(/\n\s*\n/).filter(p => !/^\s*(list of )?illustrations\b/i.test(p)).map(p => {
           const lines = p.split('\n').map(l => l.trim()).filter(Boolean);
           return { lines, text: lines.join(' ').replace(/\s+/g, ' ') };
         }).filter(p => p.text.length);
@@ -3661,8 +3693,50 @@
         return pages;
       }
 
-      function makeBook({ idKey, title, author, paras, cut, source, short, verse, emoji }) {
-        const pages = verse ? paras.slice() : (short ? paginateShort(paras) : paginate(paras));
+      // Split a sentence that is too long for one page at a natural pause (; : , — or "and")
+      function splitLong(sn, max) {
+        const out = [];
+        while (sn.length > max) {
+          const head = sn.slice(0, max + 1);
+          let cut = -1;
+          for (const re of [/[;:]\s/g, /—|\s-\s/g, /,\s/g, /\s(and|but|or|so|then|when|while)\s/g]) {
+            let m; while ((m = re.exec(head))) if (m.index > max * 0.35) cut = m.index + (m[0].startsWith(' ') ? 0 : m[0].trimEnd().length);
+            if (cut > 0) break;
+          }
+          if (cut <= 0) cut = head.lastIndexOf(' ');
+          if (cut <= 0) cut = max;
+          out.push(sn.slice(0, cut).trim()); sn = sn.slice(cut).trim();
+        }
+        if (sn) out.push(sn);
+        return out;
+      }
+      // Pages with room for a picture: about 150 characters, broken at sentence ends,
+      // starting a new page at each paragraph (tiny paragraphs like short dialogue can share)
+      const ABBR = /\b(Mr|Mrs|Ms|Dr|St|Mt|Jr|Sr|Capt|Col|Gen|Prof|Rev|No|vs|etc|i\.e|e\.g)\./g;
+      function paginatePictures(paras, maxChars = 150) {
+        const pages = []; let cur = '';
+        const push = () => { if (cur.trim()) pages.push(cur.trim().replace(/\u2024/g, '.')); cur = ''; };
+        paras.forEach(raw => {
+          const par = raw.replace(/--/g, '—').replace(ABBR, '$1\u2024');   // keep "Mrs." from ending a sentence
+          const heading = par.length < 70 && par === par.toUpperCase() && /[A-Z]{3}/.test(par) && !/[.!?,]$/.test(par);
+          if (heading) {                                   // titles and chapter names
+            push();
+            if (pages.length) pages.push(titleCase(par).replace(/\b(Chapter|Part|Book|Story)\s+([ivxlc]+)\b/gi, (m, w, n) => w + ' ' + n.toUpperCase())); // the book's own title is already on the title page
+            return;
+          }
+          if (cur.length > 70 || (cur && cur.length + par.length + 1 > maxChars)) push();
+          const sentences = (par.match(/[^.!?…]+[.!?…]+["”’')\]]*\s*|[^.!?…]+$/g) || [par]).map(x => x.trim()).filter(Boolean);
+          sentences.forEach(sn => splitLong(sn, maxChars).forEach(piece => {
+            if (cur && cur.length + piece.length + 1 > maxChars) push();
+            cur = cur ? cur + ' ' + piece : piece;
+          }));
+        });
+        push();
+        return pages;
+      }
+
+      function makeBook({ idKey, title, author, paras, cut, source, short, verse, emoji, pictures }) {
+        const pages = verse ? paras.slice() : pictures ? paginatePictures(paras) : (short ? paginateShort(paras) : paginate(paras));
         if (cut) pages.push('… The story continues in the full book at gutenberg.org.');
         pages.push('The End');
         const spreads = [];
@@ -3673,7 +3747,7 @@
           id: 'lib-' + idKey, title, author, coverColor: color, spineColor: color, accentColor: '#e6c46a',
           emoji: emoji || (hint ? hint[1] : '📖'), drawingData: null, source,
           style: { leather: 'pebbled', foil: 'shiny', border: 'ornate', spine: 'four', font: 'classic', edges: 'classic' },
-          pages: spreads, pageStyle: (short || verse) ? 'short' : 'long'
+          pages: spreads, pageStyle: pictures ? 'pictures' : (short || verse) ? 'short' : 'long', illustrationSpace: !!pictures
         };
       }
 
@@ -4059,7 +4133,7 @@
         const q = (query || '').toLowerCase();
         return CATALOG.filter(c => q ? (c.title + ' ' + c.author).toLowerCase().includes(q) : c.topics.includes(topic));
       };
-      return { CATALOG, makeStory, catalogFor, search, fetchText, looksLikeText, pickTextUrl, stripGutenberg, toParagraphs, splitSections, paginate, capWords, authorName, makeBook, wc, titleCase, MAX_WORDS, FABLES };
+      return { paginatePictures, splitLong, CATALOG, makeStory, catalogFor, search, fetchText, looksLikeText, pickTextUrl, stripGutenberg, toParagraphs, splitSections, paginate, capWords, authorName, makeBook, wc, titleCase, MAX_WORDS, FABLES };
     })();
 
     // ---- Library window ----
@@ -4181,7 +4255,7 @@
             if (secs.length >= 2) { showSections(book, secs, author, src); say(''); return; }
           }
           const capped = Library.capWords(pars.map(p => p.text));
-          const ok = addToShelf(Library.makeBook({ idKey: book.key, title: Library.titleCase(book.title.split(/;|\bor,/i)[0].trim()), author, paras: capped.paras, cut: capped.cut, source: src }));
+          const ok = addToShelf(Library.makeBook({ idKey: book.key, title: Library.titleCase(book.title.split(/;|\bor,/i)[0].trim()), author, paras: capped.paras, cut: capped.cut, source: src, pictures: true }));
           if (ok) { btn.textContent = 'Added ✓'; say(capped.cut ? 'Added the first part of the story.' : ''); return; }
         } catch (e) {
           const el = $('lib-status');
@@ -4202,7 +4276,7 @@
         $('lib-sections').onclick = (e) => {
           const b = e.target.closest('[data-sec]'); if (!b) return;
           const s = secs[+b.dataset.sec], capped = Library.capWords(s.paras);
-          if (addToShelf(Library.makeBook({ idKey: (book.key || book.id) + '-' + b.dataset.sec, title: s.title, author, paras: capped.paras, cut: capped.cut, source: src }))) { b.textContent = 'Added ✓'; b.disabled = true; }
+          if (addToShelf(Library.makeBook({ idKey: (book.key || book.id) + '-' + b.dataset.sec, title: s.title, author, paras: capped.paras, cut: capped.cut, source: src, pictures: true }))) { b.textContent = 'Added ✓'; b.disabled = true; }
         };
       }
 
@@ -4243,11 +4317,29 @@
             if (secs.length >= 2) { showSections({ id: key, title }, secs, author, 'Imported file'); say(''); return; }
           }
           const capped = Library.capWords(pars.map(p => p.text));
-          addToShelf(Library.makeBook({ idKey: key, title, author, paras: capped.paras, cut: capped.cut, source: 'Imported file' }));
+          addToShelf(Library.makeBook({ idKey: key, title, author, paras: capped.paras, cut: capped.cut, source: 'Imported file', pictures: true }));
         };
         reader.onerror = () => say('Sorry, that file couldn’t be read.', true);
         reader.readAsText(file);
       });
+      // Downloaded/imported books already on the shelf get re-paged with room for pictures
+      (function upgradeDownloaded() {
+        let changed = false;
+        libraryData = libraryData.map(b => {
+          if (!/^(Project Gutenberg|Imported file)/.test(b.source || '') || b.pageStyle === 'pictures') return b;
+          if ((b.pages || []).some(p => p.leftImage || p.rightImage)) return b;          // keep books you've decorated
+          let texts = [];
+          (b.pages || []).forEach(p => texts.push(p.leftText || '', p.rightText || ''));
+          texts = texts.map(t => Library.stripGutenberg(t).trim()).filter(Boolean);
+          let cut = false;
+          while (texts.length && /^(The End|… The story continues)/.test(texts[texts.length - 1])) { if (/continues/.test(texts.pop())) cut = true; }
+          if (!texts.length) return b;
+          changed = true;
+          const nb = Library.makeBook({ idKey: b.id.replace(/^lib-/, ''), title: b.title, author: b.author, paras: texts, cut, source: b.source, pictures: true, emoji: b.emoji });
+          return Object.assign({}, b, { pages: nb.pages, pageStyle: 'pictures', illustrationSpace: true });
+        });
+        if (changed) { saveLibrary(libraryData); populateBookshelf(); }
+      })();
       // Fables already on the shelf from before get rebuilt with the shorter pages
       (function upgradeOldFables() {
         let changed = false;
