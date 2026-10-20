@@ -2564,7 +2564,6 @@
           }
           isAnimating = false;
           if (onDone) onDone();
-          else if (isBookOpen && isSeated && !isHeld && !zoomSide) zoomIn();   // seated: look straight at the first page
         }
       });
 
@@ -2684,14 +2683,15 @@
       return [[x0, -h], [x1, -h], [x0, h], [x1, h]].map(([x, y]) => currentActiveBook.localToWorld(new THREE.Vector3(x, y, 0)));
     }
     function zoomTo(side) {
-      if (!currentActiveBook || !isBookOpen || isHeld) return;
+      if (!currentActiveBook || !isBookOpen) return;
       zoomSide = side; updateZoomUI();
       const c = currentActiveBook.localToWorld(new THREE.Vector3(side === 'left' ? -PAGE_CX : PAGE_CX, 0, 0));
-      if (isSeated) {
-        // stay in the chair: lean in a little, turn your head to the page, and focus (narrow the view) on it
-        const pos = new THREE.Vector3(c.x * 0.25, 0.6, 2.25);
+      if (isHeld) {
+        // holding the book: it stays still in your hands while your head turns to the page and your eyes focus on it
+        heldFrozen = true;
         freeSeatLimits();
-        tweenView(pos, headTarget(pos, c), fovToFit(pos, c, pageCorners(side)), 0.8);
+        const pos = camera.position.clone();
+        tweenView(pos, headTarget(pos, c), fovToFit(pos, c, pageCorners(side)), 0.7);
         return;
       }
       const fov = readingFov(), T = Math.tan(fov * Math.PI / 360), a = camera.aspect;
@@ -2703,10 +2703,15 @@
     function zoomOut(quick) {
       if (!zoomSide) return;
       zoomSide = null; updateZoomUI();
-      if (quick) return;                                   // something else is moving the camera
+      if (quick) { heldFrozen = false; return; }          // something else is moving the camera
+      if (isHeld && currentActiveBook) {                  // look back at the whole book in your hands
+        const pos = camera.position.clone(), c = currentActiveBook.localToWorld(new THREE.Vector3(0, 0, 0));
+        tweenView(pos, headTarget(pos, c), readingFov(), 0.7, () => { heldFrozen = false; setSeatLimits(); });
+        return;
+      }
       tweenView(CAMERA_TABLE_POS, CAMERA_TABLE_LOOK, readingFov(), 0.7, () => { if (isSeated) setSeatLimits(); });
     }
-    function zoomIn() { if (isBookOpen && !isHeld) zoomTo(leftPageOK() ? 'left' : 'right'); }
+    function zoomIn() { if (isBookOpen) zoomTo(leftPageOK() ? 'left' : 'right'); }
     function zoomForward() {
       if (isAnimating || !currentActiveBook) return;
       if (zoomSide === 'left' && rightPageOK()) return zoomTo('right');
@@ -3661,7 +3666,7 @@
 
     /* ---------- Pick up the book while seated (held up in front of you for easier reading) ---------- */
     const HOLD_D = 1.1;                                   // how far in front of your eyes the book is held
-    let isHeld = false, heldX = 0, heldD = HOLD_D, heldS = 1, holdBtnShown = false;
+    let isHeld = false, heldX = 0, heldD = HOLD_D, heldS = 1, holdBtnShown = false, heldFrozen = false;
     const holdProxy = { v: 0 };                          // 0 = on the table, 1 = held up
     const holdBtn = document.getElementById('btn-hold-book');
     const holdText = document.getElementById('hold-text');
@@ -3671,12 +3676,17 @@
     function pickUpBook() {
       if (!isSeated || !isBookOnTable || !currentActiveBook || isAnimating || isHeld) return;
       zoomOut();
+      heldFrozen = false;
       isHeld = true; heldX = currentActiveBook.position.x;
       holdText.innerText = 'Put Down';
       gsap.to(holdProxy, { v: 1, duration: 0.9, ease: 'power2.inOut' });
     }
     function putDownBook(cb) {
       if (!isHeld) { if (cb) cb(); return; }
+      if (zoomSide) {                                     // stop reading close-up; look back at the desk
+        zoomSide = null; heldFrozen = false; updateZoomUI();
+        tweenView(camera.position.clone(), SEAT_TARGET, readingFov(), 0.8, setSeatLimits);
+      }
       holdText.innerText = 'Pick Up Book';
       gsap.to(holdProxy, { v: 0, duration: 0.8, ease: 'power2.inOut', onComplete: () => {
         isHeld = false;
@@ -3690,7 +3700,7 @@
 
     // Runs every frame: keeps the held book in front of your eyes, facing you, wherever you look
     function updateHeldBook() {
-      const showZoom = isBookOnTable && isBookOpen && !isHeld;
+      const showZoom = isBookOnTable && isBookOpen;
       if (zoomBtn.classList.contains('hidden') === showZoom) zoomBtn.classList.toggle('hidden', !showZoom);
       const showShelfBtn = isSeated && !isBookOnTable;
       if (shelfLookBtn.classList.contains('hidden') === showShelfBtn) shelfLookBtn.classList.toggle('hidden', !showShelfBtn);
@@ -3698,6 +3708,7 @@
       if (show !== holdBtnShown) { holdBtnShown = show; holdBtn.classList.toggle('hidden', !show); }
       if (!currentActiveBook || (!isHeld && holdProxy.v <= 0)) return;
       const b = currentActiveBook;
+      if (!heldFrozen) {                                 // zoomed in: the book stays put while your head turns
       camera.getWorldDirection(_dir);
       _right.crossVectors(_dir, camera.up).normalize();
       // Hold the book at a fixed, close distance (so it never reaches the shelf) and
@@ -3712,6 +3723,7 @@
       _holdObj.position.y -= 0.1;
       _holdObj.lookAt(camera.position);                 // the book's page side faces you
       _holdObj.position.addScaledVector(_right, heldX);
+      }
       _tablePos.set(heldX, BOOK_REST_Y, TABLE_Z);
       const k = holdProxy.v;
       b.position.copy(_tablePos).lerp(_holdObj.position, k);
@@ -3825,6 +3837,7 @@
           source: 'ia', next: page * ROWS < (r.numFound || 0),
           results: (r.docs || []).map(d => ({
             key: 'ia-' + d.identifier, iaId: d.identifier, title: [].concat(d.title || 'Untitled')[0],
+            gbNum: (/(\d+)gut$/i.exec(d.identifier) || [])[1] ? +(/(\d+)gut$/i.exec(d.identifier)[1]) : null,
             authors: [{ name: cleanAuthor([].concat(d.creator || 'Unknown')[0]) }],
             download_count: d.downloads, link: 'https://archive.org/details/' + d.identifier, src: 'Project Gutenberg (via Internet Archive)'
           }))
@@ -3861,18 +3874,25 @@
       const IMG_LIMIT = 30;                                    // most pictures added to one book
       const looksLikeHtml = t => !!t && t.length > 2000 && /<(html|body)\b/i.test(t);
       async function fetchHtmlEdition(book) {
-        if (book.gbId) {
-          const base = 'https://www.gutenberg.org/cache/epub/' + book.gbId + '/';
-          return { html: await race(base + 'pg' + book.gbId + '-images.html', looksLikeHtml, 30000), base };
+        const tries = [];
+        const num = book.gbId || book.gbNum;
+        if (num) {
+          const base = 'https://www.gutenberg.org/cache/epub/' + num + '/';
+          tries.push(race(base + 'pg' + num + '-images.html', looksLikeHtml, 30000).then(html => ({ html, base })));
         }
         if (book.iaId) {
-          const meta = await iaMeta(book.iaId);
-          const f = meta.files.find(f => /\.html?$/i.test(f.name) && !/_meta|_files/i.test(f.name));
-          if (!f) throw new Error('No illustrated edition');
-          const url = iaFileUrl(book.iaId, f.name);
-          return { html: await race(url, looksLikeHtml, 30000), base: url };
+          tries.push(iaMeta(book.iaId).then(meta => {
+            const f = meta.files.find(f => /\.html?$/i.test(f.name) && !/_meta|_files/i.test(f.name));
+            if (!f) throw new Error('No illustrated edition in the Archive copy');
+            const url = iaFileUrl(book.iaId, f.name);
+            return race(url, looksLikeHtml, 30000).then(html => ({ html, base: url }));
+          }));
         }
-        throw new Error('No illustrated edition');
+        if (!tries.length) throw new Error('No illustrated edition');
+        return new Promise((resolve, reject) => {          // first one that works
+          let left = tries.length;
+          tries.forEach(t => t.then(resolve, () => { if (--left === 0) reject(new Error('Illustrated edition unreachable')); }));
+        });
       }
       // Walk the page in reading order: paragraphs, headings and pictures
       function parseHtmlEdition(html, base) {
@@ -3944,12 +3964,12 @@
         });
       }
       // Fetch the pictures with these numbers, three at a time; returns Map(number -> picture)
-      async function fetchPictures(indices, images, onProgress) {
+      async function fetchPictures(indices, images, onProgress, loader = fetchPicture) {
         const got = new Map(); let next = 0, done = 0;
         const worker = async () => {
           while (next < indices.length) {
             const k = indices[next++];
-            try { got.set(k, await fetchPicture(images[k])); } catch (e) {}
+            try { got.set(k, await loader(images[k])); } catch (e) {}
             done++; if (onProgress) onProgress(done, indices.length);
           }
         };
@@ -4533,12 +4553,12 @@
         const q = (query || '').toLowerCase();
         return CATALOG.filter(c => q ? (c.title + ' ' + c.author).toLowerCase().includes(q) : c.topics.includes(topic));
       };
-      async function makeIllustratedBook(opts, images, cover, onProgress) {
+      async function makeIllustratedBook(opts, images, cover, onProgress, loader = fetchPicture) {
         let book = makeBook(opts);
         const used = [];
         book.pages.forEach(sp => ['left', 'right'].forEach(side => { const k = sp[side + 'ImgIdx']; if (k != null) used.push(k); }));
         let got = new Map();
-        if (used.length) got = await fetchPictures(used, images, onProgress);
+        if (used.length) got = await fetchPictures(used, images, onProgress, loader);
         const enough = used.length > 0 && got.size >= Math.max(1, used.length / 2);
         // rebuild without the stand-ins for pictures we don't have
         const paras = opts.paras.filter(t => { const m = IMG_TOKEN.exec(t); return !m || (enough && got.has(+m[1])); });
@@ -4548,11 +4568,68 @@
           if (k != null) { sp[side + 'Image'] = got.get(k); delete sp[side + 'ImgIdx']; }
         }));
         if (enough) book.illustrationSpace = false;      // the book has its own pictures: words get the whole page
-        if (cover) { try { book.coverImage = await fetchPicture(cover); book.coverImageMode = 'oval'; } catch (e) {} }
-        return { book, pictures: enough ? got.size : 0 };
+        if (cover) { try { book.coverImage = await loader(cover); book.coverImageMode = 'oval'; } catch (e) {} }
+        return { book, pictures: enough ? got.size : 0, wanted: used.length };
       }
 
-      return { fetchHtmlEdition, parseHtmlEdition, editionToParas, makeIllustratedBook, IMG_TOKEN, paginatePictures, splitLong, CATALOG, makeStory, catalogFor, search, fetchText, looksLikeText, pickTextUrl, stripGutenberg, toParagraphs, splitSections, paginate, capWords, authorName, makeBook, wc, titleCase, MAX_WORDS, FABLES };
+      /* ---- EPUB files (Gutenberg's "EPUB with images"): a zip of web pages and pictures ---- */
+      async function inflateRaw(u8) {
+        if (!window.DecompressionStream) throw new Error('This browser can’t open EPUB files. Try updating it, or use Chrome.');
+        const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+        return new Uint8Array(await new Response(stream).arrayBuffer());
+      }
+      function readZip(buf) {
+        const u8 = new Uint8Array(buf), dv = new DataView(buf);
+        let eocd = -1;
+        for (let i = u8.length - 22; i >= Math.max(0, u8.length - 70000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+        if (eocd < 0) throw new Error('That file isn’t a valid EPUB.');
+        const count = dv.getUint16(eocd + 10, true);
+        let p = dv.getUint32(eocd + 16, true);
+        const entries = new Map(), dec = new TextDecoder();
+        for (let n = 0; n < count && dv.getUint32(p, true) === 0x02014b50; n++) {
+          const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+          const nlen = dv.getUint16(p + 28, true), elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+          const local = dv.getUint32(p + 42, true);
+          const name = dec.decode(u8.subarray(p + 46, p + 46 + nlen));
+          entries.set(name, { method, csize, local });
+          p += 46 + nlen + elen + clen;
+        }
+        const get = async (name) => {
+          const e = entries.get(name); if (!e) throw new Error('Missing ' + name);
+          const start = e.local + 30 + dv.getUint16(e.local + 26, true) + dv.getUint16(e.local + 28, true);
+          const data = u8.subarray(start, start + e.csize);
+          return e.method === 0 ? data : inflateRaw(data);
+        };
+        return { names: [...entries.keys()], get, text: async (name) => dec.decode(await get(name)) };
+      }
+      const attr = (tag, a) => { const m = new RegExp('\\b' + a + '\\s*=\\s*"([^"]*)"', 'i').exec(tag) || new RegExp('\\b' + a + "\\s*=\\s*'([^']*)'", 'i').exec(tag); return m ? m[1] : null; };
+      const xmlText = (xml, tag) => { const m = new RegExp('<(?:\\w+:)?' + tag + '\\b[^>]*>([\\s\\S]*?)</(?:\\w+:)?' + tag + '>', 'i').exec(xml); return m ? m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').trim() : ''; };
+      const EPUB_BASE = 'https://epub.local/';
+      async function readEpub(buf) {
+        const zip = readZip(buf);
+        const container = await zip.text('META-INF/container.xml');
+        const opfPath = attr((/<rootfile\b[^>]*>/i.exec(container) || [''])[0], 'full-path');
+        if (!opfPath) throw new Error('That file isn’t a valid EPUB.');
+        const opf = await zip.text(opfPath), dir = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/') + 1) : '';
+        const manifest = {};
+        (opf.match(/<item\b[^>]*>/gi) || []).forEach(t => { const id = attr(t, 'id'); if (id) manifest[id] = { href: attr(t, 'href'), type: attr(t, 'media-type') || '', props: attr(t, 'properties') || '' }; });
+        const spine = (opf.match(/<itemref\b[^>]*>/gi) || []).map(t => manifest[attr(t, 'idref')]).filter(it => it && /html/i.test(it.type));
+        const resolve = (href) => new URL(href, EPUB_BASE + dir).href;
+        let items = [];
+        for (const it of spine) items = items.concat(parseHtmlEdition(await zip.text(decodeURIComponent(new URL(resolve(it.href)).pathname.slice(1))), resolve(it.href)));
+        const r = editionToParas(items);
+        const coverItem = Object.values(manifest).find(m => /cover-image/.test(m.props)) || manifest[attr((/<meta\b[^>]*name="cover"[^>]*>/i.exec(opf) || [''])[0], 'content')];
+        if (!r.cover && coverItem && /image/.test(coverItem.type)) r.cover = resolve(coverItem.href);
+        const loader = async (url) => {
+          const path = decodeURIComponent(new URL(url).pathname.slice(1));
+          const ext = (path.split('.').pop() || '').toLowerCase();
+          const type = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' }[ext] || 'application/octet-stream';
+          return decodeToDataUrl(new Blob([await zip.get(path)], { type }));
+        };
+        return { title: xmlText(opf, 'title'), author: xmlText(opf, 'creator'), pars: r.pars, images: r.images, cover: r.cover, loader };
+      }
+
+      return { readEpub, readZip, fetchHtmlEdition, parseHtmlEdition, editionToParas, makeIllustratedBook, IMG_TOKEN, paginatePictures, splitLong, CATALOG, makeStory, catalogFor, search, fetchText, looksLikeText, pickTextUrl, stripGutenberg, toParagraphs, splitSections, paginate, capWords, authorName, makeBook, wc, titleCase, MAX_WORDS, FABLES };
     })();
 
     // ---- Library window ----
@@ -4581,7 +4658,7 @@
             </div>
             <div class="flex items-center justify-between mt-3 gap-3">
               <div class="flex flex-col items-start gap-1">
-                <label class="text-xs text-amber-300 hover:text-amber-200 underline cursor-pointer">Import a story from a .txt file<input id="lib-import" type="file" accept=".txt,text/plain" class="hidden"></label>
+                <label class="text-xs text-amber-300 hover:text-amber-200 underline cursor-pointer">Import a book file (.epub with pictures, or .txt)<input id="lib-import" type="file" accept=".epub,application/epub+zip,.txt,text/plain" class="hidden"></label>
                 <div class="flex gap-2 mt-1">
                   <button id="lib-backup" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-700"><i class="fa-solid fa-download mr-1.5 text-amber-400"></i>Back up shelf</button>
                   <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-700"><i class="fa-solid fa-upload mr-1.5 text-amber-400"></i>Restore<input id="lib-restore" type="file" accept=".json,application/json" class="hidden"></label>
@@ -4666,13 +4743,24 @@
       }
 
       // Make the shelf book (fetching its original pictures if it has any) and add it
-      async function buildAndAdd({ idKey, title, author, paras, cut, src, images, cover }) {
+      async function buildAndAdd({ idKey, title, author, paras, cut, src, images, cover, loader }) {
         const opts = { idKey, title, author, paras, cut, source: src, pictures: true };
-        if (!images || !images.length) return { ok: addToShelf(Library.makeBook(opts)), pictures: 0 };
-        if (have('lib-' + idKey)) { say('That book is already on your shelf.'); return { ok: false, pictures: 0 }; }
+        const hasTokens = paras.some(t => Library.IMG_TOKEN.test(t));
+        if (!images || !images.length || !hasTokens) {
+          if (!cover || !loader) return { ok: addToShelf(Library.makeBook(opts)), pictures: 0, wanted: 0 };
+        }
+        if (have('lib-' + idKey)) { say('That book is already on your shelf.'); return { ok: false, pictures: 0, wanted: 0 }; }
         say('Adding the book’s original pictures…');
-        const r = await Library.makeIllustratedBook(opts, images, cover, (d, n) => say('Adding the book’s original pictures… ' + d + ' of ' + n));
-        return { ok: addToShelf(r.book), pictures: r.pictures };
+        const r = await Library.makeIllustratedBook(opts, images || [], cover, (d, n) => say('Adding the book’s original pictures… ' + d + ' of ' + n), loader);
+        return { ok: addToShelf(r.book), pictures: r.pictures, wanted: r.wanted };
+      }
+      // What to tell the person about pictures once the book is on the shelf
+      function pictureNote(r, edition) {
+        if (r.pictures) return 'Added with ' + r.pictures + ' original picture' + (r.pictures === 1 ? '' : 's') + '. ';
+        if (r.wanted) return 'Added, but its pictures couldn’t be downloaded. ';
+        if (edition === 'none') return 'Added without pictures: the illustrated edition couldn’t be reached. You can download the “EPUB (with images)” from gutenberg.org and use “Import a book file”. ';
+        if (edition === 'plain') return 'Added. This edition has no pictures. ';
+        return 'Added. ';
       }
 
       async function addGutenberg(book, btn) {
@@ -4680,11 +4768,12 @@
         say('Downloading “' + book.title + '”…');
         try {
           // Prefer the illustrated edition (text and pictures in reading order); fall back to plain text
-          let pars = null, images = [], cover = null;
+          let pars = null, images = [], cover = null, edition = 'none';
+          say('Downloading “' + book.title + '” (looking for its pictures)…');
           try {
             const ed = await Library.fetchHtmlEdition(book);
             const r = Library.editionToParas(Library.parseHtmlEdition(ed.html, ed.base));
-            if (Library.wc(r.pars.filter(p => !Library.IMG_TOKEN.test(p.text)).map(p => p.text).join(' ')) > 80) { pars = r.pars; images = r.images; cover = r.cover; }
+            if (Library.wc(r.pars.filter(p => !Library.IMG_TOKEN.test(p.text)).map(p => p.text).join(' ')) > 80) { pars = r.pars; images = r.images; cover = r.cover; edition = 'plain'; }
           } catch (e) { /* no illustrated edition reachable */ }
           if (!pars) pars = Library.toParagraphs(Library.stripGutenberg(await Library.fetchText(book)));
           const total = Library.wc(pars.filter(p => !Library.IMG_TOKEN.test(p.text)).map(p => p.text).join(' '));
@@ -4697,7 +4786,7 @@
           const r = await buildAndAdd({ idKey: book.key, title: Library.titleCase(book.title.split(/;|\bor,/i)[0].trim()), author, paras: capped.paras, cut: capped.cut, src, images, cover });
           if (r.ok) {
             btn.textContent = 'Added ✓';
-            say((r.pictures ? 'Added with ' + r.pictures + ' original picture' + (r.pictures === 1 ? '' : 's') + '. ' : '') + (capped.cut ? 'This is the first part of the story.' : ''));
+            say(pictureNote(r, edition) + (capped.cut ? 'This is the first part of the story.' : ''));
             return;
           }
         } catch (e) {
@@ -4708,7 +4797,7 @@
         btn.textContent = old; btn.disabled = false;
       }
 
-      function showSections(book, secs, author, src, images) {
+      function showSections(book, secs, author, src, images, loader) {
         $('lib-search-view').classList.add('hidden'); $('lib-sections-view').classList.remove('hidden');
         $('lib-sections-title').textContent = 'Pick a story or chapter from “' + book.title.split(';')[0] + '”';
         $('lib-sections').innerHTML = secs.map((s, i) => `
@@ -4720,8 +4809,8 @@
           const b = e.target.closest('[data-sec]'); if (!b || b.disabled) return;
           b.disabled = true; b.textContent = '…';
           const s = secs[+b.dataset.sec], capped = Library.capWords(s.paras);
-          const r = await buildAndAdd({ idKey: (book.key || book.id) + '-' + b.dataset.sec, title: s.title, author, paras: capped.paras, cut: capped.cut, src, images });
-          if (r.ok) { b.textContent = 'Added ✓'; say(r.pictures ? 'Added with ' + r.pictures + ' original picture' + (r.pictures === 1 ? '' : 's') + '.' : ''); }
+          const r = await buildAndAdd({ idKey: (book.key || book.id) + '-' + b.dataset.sec, title: s.title, author, paras: capped.paras, cut: capped.cut, src, images, loader });
+          if (r.ok) { b.textContent = 'Added ✓'; say(r.pictures ? pictureNote(r) : ''); }
           else { b.textContent = 'Add'; b.disabled = false; }
         };
       }
@@ -4744,10 +4833,32 @@
       $('lib-query').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
       $('lib-more').addEventListener('click', () => { state.page += 1; runSearch(true); });
       $('lib-back').addEventListener('click', () => { $('lib-sections-view').classList.add('hidden'); $('lib-search-view').classList.remove('hidden'); });
+      // Import an EPUB (e.g. "EPUB (with images)" saved from gutenberg.org): text and its pictures, no internet needed
+      async function importEpub(file) {
+        say('Opening “' + file.name + '”…');
+        try {
+          const ep = await Library.readEpub(await file.arrayBuffer());
+          const title = Library.titleCase((ep.title || file.name.replace(/\.epub$/i, '').replace(/[_-]+/g, ' ')).split(/;|\bor,/i)[0].trim());
+          const author = Library.authorName({ authors: [{ name: (ep.author || 'Unknown').replace(/,?\s*\d{3,4}\s*-\s*\d{0,4}/, '') }] });
+          const key = 'epub-' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+          const total = Library.wc(ep.pars.filter(p => !Library.IMG_TOKEN.test(p.text)).map(p => p.text).join(' '));
+          if (total < 20) { say('Couldn’t find the story text in that file.', true); return; }
+          if (total > Library.MAX_WORDS) {
+            const secs = Library.splitSections(ep.pars);
+            if (secs.length >= 2) { showSections({ key, title }, secs, author, 'Imported file', ep.images, ep.loader); say(''); return; }
+          }
+          const capped = Library.capWords(ep.pars.map(p => p.text));
+          const r = await buildAndAdd({ idKey: key, title, author, paras: capped.paras, cut: capped.cut, src: 'Imported file', images: ep.images, cover: ep.cover, loader: ep.loader });
+          if (r.ok) say(pictureNote(r, ep.images.length ? 'plain' : 'plain') + (capped.cut ? 'This is the first part of the story.' : ''));
+        } catch (err) {
+          say(err && err.message && /EPUB|browser/.test(err.message) ? err.message : 'Sorry, that file couldn’t be opened.', true);
+        }
+      }
       // Import a .txt file (e.g. one saved from gutenberg.org) — works with no relay at all
       $('lib-import').addEventListener('change', (e) => {
         const file = e.target.files && e.target.files[0]; e.target.value = '';
         if (!file) return;
+        if (/\.epub$/i.test(file.name) || file.type === 'application/epub+zip') { importEpub(file); return; }
         const reader = new FileReader();
         reader.onload = () => {
           const raw = String(reader.result || '');
