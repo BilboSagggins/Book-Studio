@@ -1477,11 +1477,16 @@
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2 + 0.05; // Don't go below floor
-    controls.minAzimuthAngle = -1.2; // can't orbit around behind the shelf
-    controls.maxAzimuthAngle = 1.2;
-    controls.minDistance = 1.5;
-    controls.maxDistance = 11;
+    // Standing or sitting, dragging turns your head where you are (the orbit pivot sits just in
+    // front of your eyes) instead of swinging you around the desk.
+    function applyHeadLookControls() {
+      controls.enablePan = false; controls.enableZoom = false;
+      controls.minDistance = 0.01; controls.maxDistance = Infinity;   // no zoom, so no limit needed (and flights stay smooth)
+      controls.minAzimuthAngle = -Infinity; controls.maxAzimuthAngle = Infinity;   // turn all the way around
+      controls.minPolarAngle = 0.35; controls.maxPolarAngle = Math.PI - 0.45;       // look up and down, never upside down
+      controls.rotateSpeed = 0.45;
+    }
+    applyHeadLookControls();
     controls.target.copy(CAMERA_SHELF_LOOK);
 
     // Lighting
@@ -3432,11 +3437,11 @@
       controls.enablePan = false; controls.enableZoom = false;
       controls.minAzimuthAngle = -Infinity; controls.maxAzimuthAngle = Infinity; controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI;
       controls.minDistance = 0.01; controls.maxDistance = Infinity;
-      tweenView(SEAT_POS, SEAT_TARGET, SEAT_FOV, 1.4, () => {   // head turn: look left/right and up to the top shelf
+      tweenView(SEAT_POS, SEAT_TARGET, Math.max(SEAT_FOV, STAND_FOV), 1.4, () => {   // head turn: look left/right and up to the top shelf
         const az = controls.getAzimuthalAngle();
         controls.minAzimuthAngle = az - 0.9; controls.maxAzimuthAngle = az + 0.9;
         controls.minPolarAngle = Math.PI / 2 - 0.55; controls.maxPolarAngle = Math.PI / 2 + 0.55;   // about 30 degrees up or down
-        controls.maxDistance = 1;
+        controls.maxDistance = 1; controls.rotateSpeed = 0.45;
       });
     }
     function standUp() {
@@ -3450,11 +3455,7 @@
       controls.minAzimuthAngle = -Infinity; controls.maxAzimuthAngle = Infinity; controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI;
       controls.minDistance = 0.01; controls.maxDistance = Infinity;
       const pos = isBookOnTable ? STAND_VIEW.tablePos : STAND_VIEW.shelfPos, look = isBookOnTable ? STAND_VIEW.tableLook : STAND_VIEW.shelfLook;
-      tweenView(pos, look, 45, 1.2, () => {
-        controls.enablePan = true; controls.enableZoom = true;
-        controls.minAzimuthAngle = -1.2; controls.maxAzimuthAngle = 1.2; controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI / 2 + 0.05;
-        controls.minDistance = 1.5; controls.maxDistance = 11;
-      });
+      tweenView(pos, look, STAND_FOV, 1.2, applyHeadLookControls);
     }
     standBtn.addEventListener('click', standUp);
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isSeated && !isBookOnTable && delOverlay.classList.contains('hidden')) standUp(); });
@@ -4543,16 +4544,32 @@
        9. RESIZE & RENDER LOOP
        ========================================================================= */
 
-    // Standing at the table: back the camera up just enough for the open book to fit the screen
-    const TABLE_LOOK0 = CAMERA_TABLE_LOOK.clone(), TABLE_DIR = new THREE.Vector3(0, 3.7, 3.0).sub(TABLE_LOOK0);
-    const TABLE_DIST0 = TABLE_DIR.length(); TABLE_DIR.normalize();
-    function updateTableCamera() {
-      const halfH = Math.tan((45 * Math.PI / 180) / 2), halfW = halfH * camera.aspect;
-      const dist = Math.max(TABLE_DIST0, (BOOK_WIDTH * 2 + 0.5) / (2 * halfW), (BOOK_HEIGHT + 0.6) / (2 * halfH * 0.55));
-      const pos = TABLE_LOOK0.clone().addScaledVector(TABLE_DIR, dist);
-      STAND_VIEW.tablePos.copy(pos);
-      if (!isSeated) CAMERA_TABLE_POS.copy(pos);
+    // Standing views, fitted to the screen: the whole shelf, and the open book on the table.
+    // Narrow (portrait) screens get a wider lens so the view isn't a thin slice.
+    let STAND_FOV = 45;
+    const SHELF_FOCUS = new THREE.Vector3(0, 1.75, 0.3), SHELF_DIR = new THREE.Vector3(0, 0.25, 1).normalize();
+    const TABLE_FOCUS = new THREE.Vector3(0, -0.6, 0.8), TABLE_DIR = new THREE.Vector3(0, 4.3, 2.2).normalize();
+    const headTarget = (pos, focus) => pos.clone().addScaledVector(focus.clone().sub(pos).normalize(), 0.05);
+    function updateViewFits() {
+      const a = camera.aspect;
+      const T = Math.max(Math.tan(22.5 * Math.PI / 180), Math.min(Math.tan(37.5 * Math.PI / 180), Math.tan(21 * Math.PI / 180) / a));
+      STAND_FOV = 2 * Math.atan(T) * 180 / Math.PI;
+      const Th = T * a;
+      // shelf: whole bookcase (about 5.2 wide, 0.9 to 3.6 high) with a margin; never past the doorway wall
+      const dShelf = Math.min(12.5, Math.max(6.4, 2.9 / Th, 2.05 / T));
+      const shelfPos = SHELF_FOCUS.clone().addScaledVector(SHELF_DIR, dShelf);
+      // table: the open book with a margin; stay under the ceiling
+      const dTable = Math.min(8, Math.max(4.83, (BOOK_WIDTH * 2 + 0.5) / (2 * Th), (BOOK_HEIGHT + 0.6) / (2 * T * 0.55)));
+      const tablePos = TABLE_FOCUS.clone().addScaledVector(TABLE_DIR, dTable);
+      STAND_VIEW.shelfPos.copy(shelfPos); STAND_VIEW.shelfLook.copy(headTarget(shelfPos, SHELF_FOCUS));
+      STAND_VIEW.tablePos.copy(tablePos); STAND_VIEW.tableLook.copy(headTarget(tablePos, TABLE_FOCUS));
+      if (!isSeated) {
+        CAMERA_SHELF_POS.copy(STAND_VIEW.shelfPos); CAMERA_SHELF_LOOK.copy(STAND_VIEW.shelfLook);
+        CAMERA_TABLE_POS.copy(STAND_VIEW.tablePos); CAMERA_TABLE_LOOK.copy(STAND_VIEW.tableLook);
+        if (Math.abs(camera.fov - STAND_FOV) > 0.01 && !gsap.isTweening(camera)) { camera.fov = STAND_FOV; camera.updateProjectionMatrix(); }
+      }
     }
+    let viewsFitted = false;
     let lastW = 0, lastH = 0;
     function fitRenderer() {
       const { w, h } = viewSize();
@@ -4561,7 +4578,12 @@
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      updateTableCamera();
+      const wasAtShelf = viewsFitted && !isSeated && !isBookOnTable && introPhase === 'done' && camera.position.distanceTo(CAMERA_SHELF_POS) < 0.15;
+      updateViewFits();
+      if (!viewsFitted || wasAtShelf) {           // first time (or standing still at the shelf): jump to the fitted view
+        if (introPhase === 'done') { camera.position.copy(CAMERA_SHELF_POS); controls.target.copy(CAMERA_SHELF_LOOK); controls.update(); }
+        viewsFitted = true;
+      }
     }
     window.addEventListener('resize', fitRenderer);
     window.addEventListener('orientationchange', () => setTimeout(fitRenderer, 250));
