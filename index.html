@@ -1559,7 +1559,7 @@
     const ROOM_DEFAULTS = { wallColor: '#233349', wallPattern: 'damask', wood: '#7a3d14', floor: '#4a2e1a', rug: '#5b1a1f', mood: 'evening', brightness: 1, lamp: true, pageBrightness: 0.6,
       floorStyle: 'planks', rugStyle: 'medallion', ceiling: '#cfc8b8', shade: '#1f5f4a', cushion: '#7a2a2a',
       window: false, wainscot: true, globe: false, plant: false,
-      wallArt: {}, frameStyle: 'gold', clock: false, lights: false, holidays: {}, holidayPreview: 'auto', fireplace: false, fireLit: true, fireBrightness: 1 };
+      wallArt: {}, frameStyle: 'gold', clock: false, lights: false, holidays: {}, holidayPreview: 'auto', fireplace: false, fireLit: true, fireBrightness: 1, brick: 'red', mantel: 'walnut', mantelStyle: 'simple' };
     let roomSettings = { ...ROOM_DEFAULTS };
     let activeHoliday = null;   // the holiday being decorated for right now (set by the holiday section below)
     try { Object.assign(roomSettings, JSON.parse(localStorage.getItem(ROOM_KEY) || '{}')); } catch (e) {}
@@ -3595,12 +3595,31 @@
       fireLight.position.set(-RW + 0.75, FLOOR + 0.65, FIRE_Z);
       scene.add(fireLight);
       const flames = [];
+      const BRICKS = {
+        red: { name: 'Red', mortar: '#b9b2a6', cols: ['#8a3b2a', '#9b4430', '#7a3424', '#a14d36', '#8f3f2c'] },
+        brown: { name: 'Brown', mortar: '#b5ab9b', cols: ['#6b4a32', '#7a5638', '#5e3f2a', '#84603f', '#704d33'] },
+        gray: { name: 'Gray', mortar: '#cfcbc4', cols: ['#6e6e70', '#7c7a78', '#5f5f63', '#8a8886', '#727074'] },
+        white: { name: 'White', mortar: '#c9c3b8', cols: ['#e8e4dc', '#dcd7cc', '#efebe3', '#d3cec2', '#e2ded5'] },
+        charcoal: { name: 'Charcoal', mortar: '#5a5752', cols: ['#3a3a3e', '#2f2f33', '#45454a', '#36363a', '#404044'] }
+      };
+      const MANTELS = {
+        walnut: { name: 'Walnut', color: '#5a3218', rough: 0.55 },
+        oak: { name: 'Oak', color: '#a9743a', rough: 0.55 },
+        white: { name: 'White', color: '#ece8df', rough: 0.45 },
+        black: { name: 'Black', color: '#1d1b1a', rough: 0.4 },
+        stone: { name: 'Stone', color: '#8f8a82', rough: 0.9 },
+        room: { name: 'Room wood', color: null, rough: 0.55 }
+      };
+      const MANTEL_STYLES = { simple: 'Simple shelf', classic: 'Classic', beam: 'Rustic beam' };
+      const H0 = FLOOR + 0.08;                               // top of the hearth
+      const mantelTop = () => H0 + 2.30 + ((roomSettings.mantelStyle || 'simple') === 'beam' ? 0.26 : 0.12);
       function brickTexture() {
+        const set = BRICKS[roomSettings.brick] || BRICKS.red;
         const c = mkC(256, 256), x = c.getContext('2d');
-        x.fillStyle = '#b9b2a6'; x.fillRect(0, 0, 256, 256);
+        x.fillStyle = set.mortar; x.fillRect(0, 0, 256, 256);
         const rows = 8, bh = 256 / rows, bw = 64;
         for (let r = 0; r < rows; r++) for (let k = -1; k < 5; k++) {
-          const ox = (r % 2) * bw / 2; x.fillStyle = pick(['#8a3b2a', '#9b4430', '#7a3424', '#a14d36', '#8f3f2c']);
+          const ox = (r % 2) * bw / 2; x.fillStyle = pick(set.cols);
           x.fillRect(k * bw + ox + 3, r * bh + 3, bw - 6, bh - 6);
           for (let i = 0; i < 25; i++) { x.fillStyle = `rgba(0,0,0,${rnd(0.03, 0.1)})`; x.fillRect(k * bw + ox + rnd(3, bw - 6), r * bh + rnd(3, bh - 6), 2, 2); }
         }
@@ -3619,24 +3638,41 @@
         const bricks = brickTexture(), brick = (rx, ry) => { const t = bricks.clone(); t.repeat.set(rx, ry); t.needsUpdate = true; return new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 }); };
         const stone = std('#6f6a63', { roughness: 0.85 }), soot = std('#161211', { roughness: 1 }), iron = std('#1c1c1f', { metalness: 0.6, roughness: 0.5 });
         const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.receiveShadow = true; g.add(m); return m; };
-        const H0 = FLOOR + 0.08;                             // top of the hearth
         add(new THREE.BoxGeometry(3.0, 0.08, 1.0), stone, 0, FLOOR + 0.04, 0.5);                      // hearth
         [-1, 1].forEach(sx => add(new THREE.BoxGeometry(0.55, 2.3, 0.5), brick(1, 4), sx * 1.025, H0 + 1.15, 0.25));   // sides
         add(new THREE.BoxGeometry(2.6, 0.6, 0.5), brick(4, 1), 0, H0 + 2.0, 0.25);                    // above the opening
-        add(new THREE.BoxGeometry(3.0, 0.12, 0.62), std('#5a3218', { roughness: 0.55 }), 0, H0 + 2.36, 0.31);   // mantel
-        add(new THREE.BoxGeometry(1.5, 1.7, 0.04), soot, 0, H0 + 0.85, 0.02);                         // inside of the firebox
-        [-1, 1].forEach(sx => add(new THREE.BoxGeometry(0.04, 1.7, 0.48), soot, sx * 0.73, H0 + 0.85, 0.25));
-        add(new THREE.BoxGeometry(1.5, 0.04, 0.48), soot, 0, H0 + 1.7, 0.25);
-        for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.03, 0.03, 0.4), iron, -0.4 + i * 0.2, H0 + 0.08, 0.27);   // grate
+        // mantel: colour and style
+        const mc = MANTELS[roomSettings.mantel] || MANTELS.walnut, style = roomSettings.mantelStyle || 'simple';
+        const mMat = std(mc.color || roomSettings.wood || '#7a3d14', { roughness: style === 'beam' ? 0.85 : mc.rough });
+        if (style === 'beam') {
+          add(new THREE.BoxGeometry(3.3, 0.26, 0.6), mMat, 0, H0 + 2.43, 0.3);                         // thick rustic beam
+        } else {
+          add(new THREE.BoxGeometry(3.0, 0.12, 0.62), mMat, 0, H0 + 2.36, 0.31);                       // shelf
+          if (style === 'classic') {
+            add(new THREE.BoxGeometry(2.8, 0.06, 0.54), mMat, 0, H0 + 2.27, 0.27);                     // moulding under the shelf
+            [-1, 1].forEach(sx => {                                                                      // brackets
+              add(new THREE.BoxGeometry(0.14, 0.32, 0.4), mMat, sx * 1.3, H0 + 2.08, 0.2);
+              add(new THREE.BoxGeometry(0.14, 0.12, 0.5), mMat, sx * 1.3, H0 + 2.22, 0.25);
+            });
+            add(new THREE.BoxGeometry(2.4, 0.05, 0.03), mMat, 0, H0 + 1.98, 0.51);                     // trim over the opening
+          }
+        }
+        // inside of the firebox: a closed sooty box set in front of the wall, so no wallpaper, panelling
+        // or baseboard shows through the opening
+        add(new THREE.BoxGeometry(1.52, 1.74, 0.08), soot, 0, H0 + 0.86, 0.16);
+        [-1, 1].forEach(sx => add(new THREE.BoxGeometry(0.06, 1.74, 0.4), soot, sx * 0.73, H0 + 0.86, 0.3));
+        add(new THREE.BoxGeometry(1.52, 0.06, 0.4), soot, 0, H0 + 1.72, 0.3);
+        add(new THREE.BoxGeometry(1.46, 0.02, 0.42), soot, 0, H0 + 0.01, 0.3);                        // sooty floor of the firebox
+        for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.03, 0.03, 0.3), iron, -0.4 + i * 0.2, H0 + 0.08, 0.34);   // grate
         add(new THREE.BoxGeometry(0.9, 0.03, 0.03), iron, 0, H0 + 0.08, 0.45);
         const bark = std('#4a2e18', { roughness: 0.95 });
-        [[-0.12, 0.17, 0.2, 0.15], [0.12, 0.17, 0.32, -0.12], [0, 0.31, 0.26, 0.05]].forEach(([x, y, z, ry]) => { const l = add(new THREE.CylinderGeometry(0.08, 0.085, 0.95, 12), bark, x, H0 + y, z); l.rotation.set(0, ry, Math.PI / 2); });
-        const embers = add(new THREE.BoxGeometry(0.8, 0.04, 0.32), glow('#ff5a1a', 1.5), 0, H0 + 0.11, 0.27);
+        [[-0.12, 0.17, 0.3, 0.15], [0.12, 0.17, 0.4, -0.12], [0, 0.31, 0.35, 0.05]].forEach(([x, y, z, ry]) => { const l = add(new THREE.CylinderGeometry(0.08, 0.085, 0.95, 12), bark, x, H0 + y, z); l.rotation.set(0, ry, Math.PI / 2); });
+        const embers = add(new THREE.BoxGeometry(0.8, 0.04, 0.26), glow('#ff5a1a', 1.5), 0, H0 + 0.11, 0.35);
         const ftex = flameTexture();
         flames.length = 0;
         [[-0.22, 0.6, 0.7], [0.05, 0.75, 0.85], [0.28, 0.55, 0.65], [0, 0.5, 1.0]].forEach(([x, w, h], i) => {
           const f = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: ftex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
-          f.position.set(x, H0 + 0.25 + h / 2, 0.26 + (i % 2) * 0.04); f.rotation.y = (i - 1.5) * 0.35;
+          f.position.set(x, H0 + 0.25 + h / 2, 0.34 + (i % 2) * 0.04); f.rotation.y = (i - 1.5) * 0.35;
           f.userData = { phase: rnd(0, 6), h, baseY: f.position.y, x };
           g.add(f); flames.push(f);
         });
@@ -3668,6 +3704,71 @@
           f.material.opacity = 0.85 + Math.sin(t * 9 + p) * 0.15;
         });
       }
+
+      // small decorations for the mantel, built facing the room
+      function candle(color, h = 0.22) {
+        const g = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, h, 14), std(color, { roughness: 0.6 })); body.position.y = h / 2; g.add(body);
+        const flame = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), glow('#ffcf6a', 2)); flame.scale.y = 1.8; flame.position.y = h + 0.03; g.add(flame);
+        flame.userData.twinkle = rnd(0, 6); animated.push(flame);
+        return g;
+      }
+      function onMantel(obj, dz, scale = 1, dx = 0.31) {       // dz: along the mantel; dx: from the wall
+        obj.scale.multiplyScalar(scale);
+        obj.position.set(-RW + dx, mantelTop(), FIRE_Z + dz);
+        obj.rotation.y = Math.PI / 2 + (obj.rotation.y || 0);
+        return obj;
+      }
+      function mantelGarland(sag, count, makeItem, opts = {}) {   // hangs along the front edge of the mantel
+        const g = garland(V(-1.45, 0, 0), V(1.45, 0, 0), sag, count, makeItem, opts);
+        g.rotation.y = Math.PI / 2; g.position.set(-RW + 0.66, mantelTop() - 0.04, FIRE_Z);
+        return g;
+      }
+      const MANTEL = {
+        newyear(g) {
+          ['#d4af37', '#c0c0c0'].forEach((c, i) => { const cd = cord(sagPoints(V(-1.45, 0, 0), V(1.45, 0, 0), 0.18 + i * 0.07), c, 0.014); const w = new THREE.Group(); w.add(cd); w.rotation.y = Math.PI / 2; w.position.set(-RW + 0.66, mantelTop() - 0.04, FIRE_Z); g.add(w); });
+          [-0.9, -0.7, 0.7, 0.9].forEach((dz, i) => g.add(onMantel(candle(i % 2 ? '#d4af37' : '#f5f0e0', 0.18 + (i % 2) * 0.08), dz)));
+        },
+        valentines(g) {
+          g.add(mantelGarland(0.18, 11, (i) => { const m = shapeMesh(heartShape(0.07), ['#c0182a', '#f58ac0', '#ffffff'][i % 3]); m.position.y -= 0.07; return m; }));
+          g.add(onMantel(roses(), 0, 0.85));
+          [-0.8, 0.8].forEach(dz => g.add(onMantel(candle('#c0182a'), dz)));
+        },
+        stpatricks(g) {
+          g.add(mantelGarland(0.18, 11, (i) => { const s = shamrock(0.08, ['#1f8a3a', '#3fbf5a', '#0f5a28'][i % 3]); s.position.y -= 0.08; return s; }));
+          g.add(onMantel(potOfGold(), 0.9, 0.45));
+          [-0.9, -0.6].forEach(dz => g.add(onMantel(candle('#1f8a3a'), dz)));
+        },
+        easter(g) {
+          g.add(mantelGarland(0.16, 11, (i) => pennant(['#f8b4d9', '#b4e0f8', '#fff1a8', '#c9f2b8', '#dcc6ff'][i % 5], 0.18, 0.22)));
+          g.add(onMantel(eggBasket(5), -0.7, 0.8));
+          g.add(onMantel(bunny(), 0.75, 0.7));
+        },
+        july4(g) {
+          const f = buntingFan(); f.scale.setScalar(0.7); f.rotation.y = Math.PI / 2; f.position.set(-RW + 0.64, mantelTop() - 0.02, FIRE_Z); g.add(f);
+          g.add(onMantel(flagStand(), -0.9, 0.9));
+          g.add(onMantel(flagStand(), 0.9, 0.9));
+        },
+        halloween(g) {
+          const bs = bulbString(V(-1.45, 0, 0), V(1.45, 0, 0), 0.18, 12, ['#ff8a1a', '#a35bff']); bs.rotation.y = Math.PI / 2; bs.position.set(-RW + 0.66, mantelTop() - 0.04, FIRE_Z); g.add(bs);
+          g.add(onMantel(pumpkin(0.13, '#e8761b', true), -0.8));
+          g.add(onMantel(pumpkin(0.1, '#f0a03a', true), 0.85));
+          [-0.3, 0.3].forEach(dz => g.add(onMantel(candle('#1b1b1f', 0.26), dz)));
+        },
+        thanksgiving(g) {
+          g.add(mantelGarland(0.18, 13, (i) => { const m = shapeMesh(leafShape(0.08), ['#d9541e', '#e89a2a', '#b8321e', '#c9a227'][i % 4]); m.position.y -= 0.07; return m; }));
+          [[-0.9, 0.12, '#e8761b'], [-0.6, 0.09, '#f3efe2'], [0.8, 0.11, '#d98a2a']].forEach(([dz, r, c]) => g.add(onMantel(pumpkin(r, c), dz)));
+          [0.1, 0.35].forEach(dz => g.add(onMantel(candle('#c9a227'), dz)));
+        },
+        christmas(g) {
+          const top = mantelTop();
+          const gl = new THREE.Group(); gl.rotation.y = Math.PI / 2; gl.position.set(-RW + 0.56, top + 0.03, FIRE_Z);
+          gl.add(cord([V(-1.5, 0, 0), V(-0.75, 0.02, 0.02), V(0, 0, 0), V(0.75, 0.02, -0.02), V(1.5, 0, 0)], '#1f5a32', 0.06));
+          const bulbs = bulbString(V(-1.45, 0.05, 0.05), V(1.45, 0.05, 0.05), 0, 14, ['#ff4d4d', '#ffd84d', '#4dd2ff', '#7dff6a']); gl.add(bulbs);
+          g.add(gl);
+          [-0.5, 0.5].forEach(dz => g.add(onMantel(candle('#c0182a', 0.26), dz, 1, 0.24)));
+        }
+      };
 
       const wallGroup = new THREE.Group(), extrasGroup = new THREE.Group(), holidayGroup = new THREE.Group();
       scene.add(wallGroup, extrasGroup, holidayGroup);
@@ -3722,7 +3823,7 @@
         if (want === builtHoliday && !force) return;
         clearAnimated(holidayGroup); disposeGroup(holidayGroup);
         builtHoliday = want; activeHoliday = want;
-        if (want) BUILD[want](holidayGroup);
+        if (want) { BUILD[want](holidayGroup); if (roomSettings.fireplace && MANTEL[want]) MANTEL[want](holidayGroup); }
         holidayGroup.traverse(o => { if (o.isMesh) o.castShadow = o.castShadow || false; });
         if (roomRefs.paintWindow) roomRefs.paintWindow(roomSettings.mood);
         if (ui.status) ui.status();
@@ -3763,6 +3864,9 @@
             <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold">Fireplace <span class="text-slate-500 font-normal">(middle of the left wall)</span></span><button data-dtoggle="fireplace" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"></button></div>
             <div data-fire-row class="flex items-center justify-between mb-2"><span class="text-xs font-semibold">Fire lit</span><button data-dtoggle="fireLit" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"></button></div>
             <div data-fire-row class="mb-2"><div class="text-[11px] text-slate-400 mb-1">Fire brightness</div><input id="fire-brightness" type="range" min="0.2" max="2" step="0.05" class="w-full accent-amber-500"></div>
+            <div data-fire-row class="mb-2"><div class="text-[11px] text-slate-400 mb-1">Brick</div><div class="flex flex-wrap gap-2">${Object.entries(BRICKS).map(([k, b]) => `<button data-brick="${k}" title="${b.name}" class="w-8 h-8 rounded-full border-2 border-white/20" style="background:linear-gradient(135deg, ${b.cols[0]} 50%, ${b.cols[2]} 50%)"></button>`).join('')}</div></div>
+            <div data-fire-row class="mb-2"><div class="text-[11px] text-slate-400 mb-1">Mantel</div><div class="flex flex-wrap gap-2">${Object.entries(MANTELS).map(([k, m]) => `<button data-mantel="${k}" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border">${m.name}</button>`).join('')}</div></div>
+            <div data-fire-row class="mb-2"><div class="text-[11px] text-slate-400 mb-1">Mantel style</div><div class="flex flex-wrap gap-2">${Object.entries(MANTEL_STYLES).map(([k, n]) => `<button data-mstyle="${k}" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border">${n}</button>`).join('')}</div></div>
             <div data-fire-row class="text-[11px] text-slate-500 mb-2">Tip: choose the <b>Fireside</b> mood at the top to make the fire the room’s main, soft light.</div>
             <input id="decor-photo" type="file" accept="image/*" class="hidden">
           </div>
@@ -3786,6 +3890,10 @@
           box.querySelector('#holiday-preview').value = roomSettings.holidayPreview || 'auto';
           box.querySelectorAll('[data-fire-row]').forEach(r => r.classList.toggle('hidden', !roomSettings.fireplace));
           box.querySelector('#fire-brightness').value = roomSettings.fireBrightness || 1;
+          const RING = ['ring-2', 'ring-amber-400', 'ring-offset-2', 'ring-offset-slate-900'];
+          box.querySelectorAll('[data-brick]').forEach(b => RING.forEach(c => b.classList.toggle(c, (roomSettings.brick || 'red') === b.dataset.brick)));
+          box.querySelectorAll('[data-mantel]').forEach(b => paint(b, (roomSettings.mantel || 'walnut') === b.dataset.mantel));
+          box.querySelectorAll('[data-mstyle]').forEach(b => paint(b, (roomSettings.mantelStyle || 'simple') === b.dataset.mstyle));
           ui.status();
         };
         ui.status = () => {
@@ -3815,6 +3923,14 @@
         });
         box.addEventListener('click', (e) => {
           const fr = e.target.closest('[data-frame]'), tg = e.target.closest('[data-dtoggle]'), hb = e.target.closest('[data-holiday]');
+          const br = e.target.closest('[data-brick]'), mt = e.target.closest('[data-mantel]'), ms = e.target.closest('[data-mstyle]');
+          if (br || mt || ms) {
+            if (br) roomSettings.brick = br.dataset.brick;
+            if (mt) roomSettings.mantel = mt.dataset.mantel;
+            if (ms) roomSettings.mantelStyle = ms.dataset.mstyle;
+            saveRoom(); buildFire(); if (ms) buildHoliday(true);          // a taller beam moves the mantel decorations up
+            ui.sync(); return;
+          }
           if (fr) { roomSettings.frameStyle = fr.dataset.frame; saveRoom(); buildWalls(); ui.sync(); }
           else if (tg) {
             const k = tg.dataset.dtoggle;
@@ -3829,6 +3945,7 @@
         // the windows toggle hides the two back-wall spots; the reset button clears everything
         panel.addEventListener('click', (e) => {
           if (e.target.closest('[data-toggle="window"]')) setTimeout(buildWalls, 0);
+          if (e.target.closest('[data-key="wood"]') && roomSettings.mantel === 'room' && roomSettings.fireplace) setTimeout(buildFire, 0);
           const moodBtn = e.target.closest('[data-key="mood"][data-val="fireside"]');
           if (moodBtn && !(roomSettings.fireplace && roomSettings.fireLit)) {          // Fireside needs a fire
             roomSettings.fireplace = true; roomSettings.fireLit = true; saveRoom(); buildFire(); buildHoliday(true); ui.sync();
