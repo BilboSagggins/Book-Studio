@@ -3473,12 +3473,65 @@
         });
       }
 
-      async function search({ query = '', topic = '', page = 1 } = {}) {
+      // Two catalogs, asked at the same time; whichever answers first is used.
+      //  1. Gutendex (unofficial Gutenberg search) — sometimes down or blocked.
+      //  2. Internet Archive's copy of Project Gutenberg — allows web pages to read it directly.
+      const IA_TOPICS = {
+        'children': 'subject:(juvenile OR children)',
+        'fairy tales': 'subject:("fairy tales")',
+        'fables': 'subject:(fables)',
+        'animals': 'subject:(animals) AND subject:(juvenile OR children)',
+        'nursery': 'subject:("nursery rhymes" OR nursery)'
+      };
+      const cleanAuthor = a => String(a || 'Unknown').replace(/,?\s*(ca\.\s*)?\d{3,4}\??\s*-\s*(\d{3,4}\??)?/g, '').replace(/,\s*$/, '').trim() || 'Unknown';
+
+      async function searchGutendex({ query, topic, page }) {
         const p = new URLSearchParams({ languages: 'en', page: String(page) });
         if (query) p.set('search', query);
         if (topic) p.set('topic', topic);
-        const t = await race(API + '?' + p.toString(), t => { try { return Array.isArray(JSON.parse(t).results); } catch (e) { return false; } }, 25000);
-        return JSON.parse(t);
+        const t = await race(API + '?' + p.toString(), t => { try { return Array.isArray(JSON.parse(t).results); } catch (e) { return false; } }, 15000);
+        const data = JSON.parse(t);
+        return {
+          source: 'gutendex', next: !!data.next,
+          results: (data.results || []).map(b => ({
+            key: 'gb' + b.id, gbId: b.id, title: b.title, formats: b.formats,
+            authors: [{ name: cleanAuthor(b.authors && b.authors[0] && b.authors[0].name) }],
+            download_count: b.download_count, link: 'https://www.gutenberg.org/ebooks/' + b.id, src: 'Project Gutenberg #' + b.id
+          }))
+        };
+      }
+
+      const ROWS = 32;
+      async function searchIA({ query, topic, page }) {
+        const words = String(query || '').replace(/[^\p{L}\p{N}\s'-]/gu, ' ').trim();
+        const what = words ? `(title:(${words}) OR creator:(${words}))` : (IA_TOPICS[topic] || IA_TOPICS.children);
+        const q = `collection:(gutenberg) AND mediatype:(texts) AND ${what}`;
+        const url = 'https://archive.org/advancedsearch.php?q=' + encodeURIComponent(q) +
+          '&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=downloads&sort[]=downloads+desc&rows=' + ROWS + '&page=' + page + '&output=json';
+        const t = await race(url, t => { try { return !!JSON.parse(t).response; } catch (e) { return false; } }, 20000);
+        const r = JSON.parse(t).response;
+        return {
+          source: 'ia', next: page * ROWS < (r.numFound || 0),
+          results: (r.docs || []).map(d => ({
+            key: 'ia-' + d.identifier, iaId: d.identifier, title: [].concat(d.title || 'Untitled')[0],
+            authors: [{ name: cleanAuthor([].concat(d.creator || 'Unknown')[0]) }],
+            download_count: d.downloads, link: 'https://archive.org/details/' + d.identifier, src: 'Project Gutenberg (via Internet Archive)'
+          }))
+        };
+      }
+
+      // First catalog to succeed wins (a small Promise.any that works on older browsers)
+      function firstOf(promises) {
+        return new Promise((resolve, reject) => {
+          let left = promises.length;
+          promises.forEach(p => p.then(resolve, () => { if (--left === 0) reject(new Error('No catalog reachable')); }));
+        });
+      }
+      async function search({ query = '', topic = '', page = 1, source = '' } = {}) {
+        const args = { query, topic, page };
+        if (source === 'gutendex') return searchGutendex(args);
+        if (source === 'ia') return searchIA(args);
+        return firstOf([searchGutendex(args), searchIA(args)]);
       }
 
       function pickTextUrl(book) {
@@ -3489,16 +3542,28 @@
       }
 
       const looksLikeText = t => t && t.length > 500 && !/^\s*<(!doctype|html)/i.test(t);
+
+      async function fetchIAText(id) {
+        const meta = JSON.parse(await race('https://archive.org/metadata/' + encodeURIComponent(id), t => { try { return Array.isArray(JSON.parse(t).files); } catch (e) { return false; } }, 20000));
+        const txt = meta.files.filter(f => /\.txt$/i.test(f.name) && !/_meta\.txt$/i.test(f.name));
+        txt.sort((a, b) => (/_djvu\.txt$/i.test(a.name) ? 1 : 0) - (/_djvu\.txt$/i.test(b.name) ? 1 : 0) || (+b.size || 0) - (+a.size || 0));
+        if (!txt.length) throw new Error('No plain-text edition');
+        return race('https://archive.org/download/' + encodeURIComponent(id) + '/' + txt[0].name.split('/').map(encodeURIComponent).join('/'), looksLikeText, 30000);
+      }
+
       async function fetchText(book) {
+        if (book.iaId) return fetchIAText(book.iaId);
         // the cache URL avoids a redirect, which some relays don't follow
-        const urls = ['https://www.gutenberg.org/cache/epub/' + book.id + '/pg' + book.id + '.txt'];
+        const urls = ['https://www.gutenberg.org/cache/epub/' + book.gbId + '/pg' + book.gbId + '.txt'];
         const listed = pickTextUrl(book);
         if (listed && !urls.includes(listed)) urls.push(listed);
-        let lastErr = null;
         for (const u of urls) {
-          try { return await race(u, looksLikeText, 30000); } catch (e) { lastErr = e; }
+          try { return await race(u, looksLikeText, 30000); } catch (e) { /* try next */ }
         }
-        throw lastErr || new Error('Download failed');
+        // Gutenberg itself unreachable: look for the same book in the Internet Archive copy
+        const found = await searchIA({ query: book.title.split(/[;:]/)[0], page: 1 });
+        if (found.results.length) return fetchIAText(found.results[0].iaId);
+        throw new Error('Download failed');
       }
 
       function stripGutenberg(raw) {
@@ -4090,7 +4155,8 @@
         if (!append) { state.books = []; renderResults(); }
         say('Looking for more on Project Gutenberg…');
         try {
-          const data = await Library.search({ query: state.query, topic: state.query ? '' : state.topic, page: state.page });
+          const data = await Library.search({ query: state.query, topic: state.query ? '' : state.topic, page: state.page, source: append ? state.source : '' });
+          state.source = data.source;
           state.books = append ? state.books.concat(data.results || []) : (data.results || []);
           state.hasMore = !!data.next;
           renderResults();
@@ -4109,18 +4175,18 @@
           const raw = await Library.fetchText(book);
           const pars = Library.toParagraphs(Library.stripGutenberg(raw));
           const total = Library.wc(pars.map(p => p.text).join(' '));
-          const author = Library.authorName(book), src = 'Project Gutenberg #' + book.id;
+          const author = Library.authorName(book), src = book.src;
           if (total > Library.MAX_WORDS) {
             const secs = Library.splitSections(pars);
             if (secs.length >= 2) { showSections(book, secs, author, src); say(''); return; }
           }
           const capped = Library.capWords(pars.map(p => p.text));
-          const ok = addToShelf(Library.makeBook({ idKey: 'gb' + book.id, title: Library.titleCase(book.title.split(/;|\bor,/i)[0].trim()), author, paras: capped.paras, cut: capped.cut, source: src }));
+          const ok = addToShelf(Library.makeBook({ idKey: book.key, title: Library.titleCase(book.title.split(/;|\bor,/i)[0].trim()), author, paras: capped.paras, cut: capped.cut, source: src }));
           if (ok) { btn.textContent = 'Added ✓'; say(capped.cut ? 'Added the first part of the story.' : ''); return; }
         } catch (e) {
           const el = $('lib-status');
           el.className = 'text-xs mb-2 min-h-[1rem] text-red-300';
-          el.innerHTML = 'Couldn’t download that story right now. Try again in a minute, or <a class="underline text-amber-300" target="_blank" rel="noopener" href="https://www.gutenberg.org/ebooks/' + Number(book.id) + '.txt.utf-8">open the text on gutenberg.org</a>, save it, and use “Import a story from a .txt file” below.';
+          el.innerHTML = 'Couldn’t download that story right now. Try again in a minute, or <a class="underline text-amber-300" target="_blank" rel="noopener" href="' + esc(book.link) + '">open the book’s page</a>, save its Plain Text file, and use “Import a story from a .txt file” below.';
         }
         btn.textContent = old; btn.disabled = false;
       }
@@ -4136,7 +4202,7 @@
         $('lib-sections').onclick = (e) => {
           const b = e.target.closest('[data-sec]'); if (!b) return;
           const s = secs[+b.dataset.sec], capped = Library.capWords(s.paras);
-          if (addToShelf(Library.makeBook({ idKey: 'gb' + book.id + '-' + b.dataset.sec, title: s.title, author, paras: capped.paras, cut: capped.cut, source: src }))) { b.textContent = 'Added ✓'; b.disabled = true; }
+          if (addToShelf(Library.makeBook({ idKey: (book.key || book.id) + '-' + b.dataset.sec, title: s.title, author, paras: capped.paras, cut: capped.cut, source: src }))) { b.textContent = 'Added ✓'; b.disabled = true; }
         };
       }
 
