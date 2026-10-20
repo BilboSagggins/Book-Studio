@@ -2920,6 +2920,7 @@
       const toggle = () => panel.classList.toggle('hidden');
       panel.querySelector('#room-close').addEventListener('click', () => panel.classList.add('hidden'));
       document.getElementById('btn-room').addEventListener('click', toggle);
+      window.addEventListener('room-restored', refresh);
       refresh();
     })();
 
@@ -4248,6 +4249,10 @@
             <div class="flex items-center justify-between mt-3 gap-3">
               <div class="flex flex-col items-start gap-1">
                 <label class="text-xs text-amber-300 hover:text-amber-200 underline cursor-pointer">Import a story from a .txt file<input id="lib-import" type="file" accept=".txt,text/plain" class="hidden"></label>
+                <div class="flex gap-2 mt-1">
+                  <button id="lib-backup" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-700"><i class="fa-solid fa-download mr-1.5 text-amber-400"></i>Back up shelf</button>
+                  <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-700"><i class="fa-solid fa-upload mr-1.5 text-amber-400"></i>Restore<input id="lib-restore" type="file" accept=".json,application/json" class="hidden"></label>
+                </div>
               </div>
               <button id="lib-more" class="hidden bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-700">More results</button>
             </div>
@@ -4436,6 +4441,91 @@
         });
         if (changed) { saveLibrary(libraryData); populateBookshelf(); }
       })();
+      // ---- Back up / Restore: the whole shelf (books, pictures, drawings) plus room settings in one file ----
+      $('lib-backup').addEventListener('click', async () => {
+        const data = { app: 'storybook-studio', version: 1, savedAt: new Date().toISOString(), books: libraryData, room: roomSettings };
+        const name = 'storybook-shelf-' + new Date().toISOString().slice(0, 10) + '.json';
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        try {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = name;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+          showToast('Backup saved: ' + name + ' (' + libraryData.length + ' books). Keep it somewhere safe.', true);
+        } catch (e) {
+          // some phones block downloads from pages; offer the share sheet instead
+          try { await navigator.share({ files: [new File([blob], name, { type: 'application/json' })], title: 'Storybook shelf backup' }); }
+          catch (err) { showToast('Sorry, this browser wouldn’t save the backup file.'); }
+        }
+      });
+
+      const restoreDlg = document.createElement('div');
+      restoreDlg.className = 'fixed inset-0 z-[55] hidden items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm';
+      restoreDlg.innerHTML = `
+        <div class="glass-panel max-w-sm w-full rounded-2xl border border-amber-500/40 p-5 shadow-2xl text-slate-200">
+          <div class="flex items-center gap-2 mb-1 text-amber-300 font-bold text-lg"><i class="fa-solid fa-upload"></i><span>Restore backup</span></div>
+          <p id="rst-info" class="text-sm mb-1"></p>
+          <p class="text-xs text-slate-400 mb-4">“Add to my shelf” keeps your current books and brings in the backup’s (books in both are updated to the backup’s version). “Replace my shelf” swaps everything, including room settings, for the backup.</p>
+          <div class="flex flex-col gap-2">
+            <button id="rst-merge" class="bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 rounded-xl py-2.5 text-sm font-bold">Add to my shelf</button>
+            <button id="rst-replace" class="bg-slate-800 hover:bg-slate-700 text-red-300 rounded-xl py-2.5 text-sm font-semibold border border-red-500/40">Replace my shelf</button>
+            <button id="rst-cancel" class="bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm font-semibold border border-slate-700">Cancel</button>
+          </div>
+        </div>`;
+      document.body.appendChild(restoreDlg);
+      let pendingRestore = null;
+      const closeRestore = () => { restoreDlg.classList.add('hidden'); restoreDlg.classList.remove('flex'); pendingRestore = null; };
+      restoreDlg.querySelector('#rst-cancel').addEventListener('click', closeRestore);
+      restoreDlg.addEventListener('click', (e) => { if (e.target === restoreDlg) closeRestore(); });
+
+      $('lib-restore').addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0]; e.target.value = '';
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          let data;
+          try { data = JSON.parse(String(reader.result)); } catch (err) { showToast('That file isn’t a Storybook backup.'); return; }
+          const books = Array.isArray(data) ? data : data && data.books;    // also accepts a bare list of books
+          const ok = Array.isArray(books) && books.length && books.every(b => b && typeof b === 'object' && b.id && Array.isArray(b.pages));
+          if (!ok) { showToast('That file isn’t a Storybook backup.'); return; }
+          pendingRestore = { books, room: data.room && typeof data.room === 'object' ? data.room : null };
+          const when = data.savedAt ? ' from ' + new Date(data.savedAt).toLocaleDateString() : '';
+          restoreDlg.querySelector('#rst-info').textContent = 'This backup' + when + ' has ' + books.length + ' book' + (books.length === 1 ? '' : 's') + '.';
+          restoreDlg.classList.remove('hidden'); restoreDlg.classList.add('flex');
+        };
+        reader.onerror = () => showToast('Sorry, that file couldn’t be read.');
+        reader.readAsText(file);
+      });
+
+      function finishRestore(msg) {
+        saveLibrary(libraryData);
+        hoveredBook = null;
+        populateBookshelf();
+        renderBuiltin();
+        closeRestore();
+        showToast(msg, true);
+      }
+      restoreDlg.querySelector('#rst-merge').addEventListener('click', () => {
+        if (!pendingRestore) return;
+        let added = 0, updated = 0;
+        pendingRestore.books.forEach(b => {
+          const i = libraryData.findIndex(x => x.id === b.id);
+          if (i >= 0) { libraryData[i] = b; updated++; } else { libraryData.push(b); added++; }
+        });
+        finishRestore(added + ' book' + (added === 1 ? '' : 's') + ' added' + (updated ? ', ' + updated + ' updated' : '') + '.');
+      });
+      restoreDlg.querySelector('#rst-replace').addEventListener('click', () => {
+        if (!pendingRestore) return;
+        libraryData = pendingRestore.books.slice();
+        if (pendingRestore.room) {
+          roomSettings = Object.assign({ ...ROOM_DEFAULTS }, pendingRestore.room);
+          saveRoom(); applyRoom('all');
+          pageMats.forEach(m => m.color.setScalar(roomSettings.pageBrightness));
+          window.dispatchEvent(new Event('room-restored'));
+        }
+        finishRestore('Shelf restored: ' + libraryData.length + ' books.');
+      });
+
       const close = () => { ov.classList.add('hidden'); ov.classList.remove('flex'); };
       $('lib-close').addEventListener('click', close);
       ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
