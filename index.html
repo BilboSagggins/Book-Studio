@@ -293,7 +293,7 @@
               <i class="fa-solid fa-paintbrush mr-1.5 text-amber-400"></i> Interactive Cover Preview (Draw custom cover art below!)
             </span>
             <div class="relative rounded-lg shadow-2xl overflow-hidden border-2 border-slate-700 bg-slate-900">
-              <canvas id="drawing-canvas" width="400" height="520" class="block bg-slate-900"></canvas>
+              <canvas id="drawing-canvas" width="520" height="390" class="block bg-slate-900 max-w-full h-auto"></canvas>
             </div>
           </div>
         </div>
@@ -657,30 +657,31 @@
 
       // Title page (first right-hand page) or closing page (last left-hand page)
       createTitlePageTexture(book, closing = false) {
-        const W = 512, H = 680, c = document.createElement('canvas'); c.width = W; c.height = H;
+        const W = 800, H = 600, c = document.createElement('canvas'); c.width = W; c.height = H;
         const ctx = c.getContext('2d');
         ctx.fillStyle = '#eee3c6'; ctx.fillRect(0, 0, W, H);
         ctx.strokeStyle = 'rgba(217, 119, 6, 0.15)'; ctx.lineWidth = 2; ctx.strokeRect(25, 25, W - 50, H - 50);
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         if (closing) {
-          ctx.fillStyle = '#6b5b45'; ctx.font = "60px sans-serif"; ctx.fillText('✨', W / 2, H / 2 - 30);
-          ctx.font = "italic 24px Georgia, serif"; ctx.fillText('Thanks for reading!', W / 2, H / 2 + 40);
+          ctx.fillStyle = '#6b5b45'; ctx.font = "70px sans-serif"; ctx.fillText('✨', W / 2, H / 2 - 36);
+          ctx.font = "italic 32px Georgia, serif"; ctx.fillText('Thanks for reading!', W / 2, H / 2 + 40);
         } else {
-          ctx.font = "100px sans-serif"; ctx.fillText(book.emoji || '📖', W / 2, 200);
-          ctx.fillStyle = '#16100a'; ctx.font = "bold 36px 'Fredoka', 'Quicksand', sans-serif";
-          const words = String(book.title || 'Untitled').split(' '); let line = '', y = 340; const lines = [];
-          words.forEach(w => { const t = line + w + ' '; if (ctx.measureText(t).width > 400 && line) { lines.push(line.trim()); line = w + ' '; } else line = t; });
+          ctx.font = "110px sans-serif"; ctx.fillText(book.emoji || '📖', W / 2, 160);
+          ctx.fillStyle = '#16100a'; ctx.font = "bold 46px 'Fredoka', 'Quicksand', sans-serif";
+          const words = String(book.title || 'Untitled').split(' '); let line = '', y = 310; const lines = [];
+          words.forEach(w => { const t = line + w + ' '; if (ctx.measureText(t).width > 640 && line) { lines.push(line.trim()); line = w + ' '; } else line = t; });
           lines.push(line.trim());
-          lines.forEach((l, i) => ctx.fillText(l, W / 2, y + i * 46));
-          ctx.fillStyle = '#6b5b45'; ctx.font = "600 22px 'Quicksand', sans-serif";
-          ctx.fillText('by ' + (book.author || 'Unknown'), W / 2, y + lines.length * 46 + 30);
+          lines.forEach((l, i) => ctx.fillText(l, W / 2, y + i * 56));
+          ctx.fillStyle = '#6b5b45'; ctx.font = "600 28px 'Quicksand', sans-serif";
+          ctx.fillText('by ' + (book.author || 'Unknown'), W / 2, y + lines.length * 56 + 26);
         }
         const t = new THREE.CanvasTexture(c); t.needsUpdate = true; return t;
       },
 
       // Inner Book Pages Texture (optional picture; layout 'above' or 'full'; textBg 'plain' or 'direct')
       createPageTexture(text, emoji, pageNum, isRightPage = false, opts = {}) {
-        const W = 512, H = 680;
+        const W = 800, H = 600;
+        const PX = 40, PY = 40, PW = W - 80, PH = 270;   // picture area
         const canvas = document.createElement('canvas');
         canvas.width = W;
         canvas.height = H;
@@ -724,36 +725,38 @@
           // Illustration: your picture, otherwise the emoji
           if (!full) {
             if (img) {
-              ctx.save(); rr(50, 50, 412, 300, 18); ctx.clip();
-              Realism.drawCoverFit(ctx, img, 50, 50, 412, 300); ctx.restore();
-              ctx.strokeStyle = 'rgba(120, 85, 40, 0.45)'; ctx.lineWidth = 3; rr(50, 50, 412, 300, 18); ctx.stroke();
+              ctx.save(); rr(PX, PY, PW, PH, 18); ctx.clip();
+              Realism.drawCoverFit(ctx, img, PX, PY, PW, PH); ctx.restore();
+              ctx.strokeStyle = 'rgba(120, 85, 40, 0.45)'; ctx.lineWidth = 3; rr(PX, PY, PW, PH, 18); ctx.stroke();
             } else if (emoji) {
               ctx.fillStyle = 'rgba(205, 175, 120, 0.30)';
-              ctx.beginPath(); ctx.arc(W / 2, 220, 110, 0, Math.PI * 2); ctx.fill();
+              ctx.beginPath(); ctx.arc(W / 2, PY + PH / 2, 115, 0, Math.PI * 2); ctx.fill();
               ctx.fillStyle = '#16100a';
               ctx.font = "110px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-              ctx.fillText(emoji, W / 2, 225);
+              ctx.fillText(emoji, W / 2, PY + PH / 2 + 5);
             } else if (opts.reserve) {                   // empty space kept for an illustration
-              ctx.fillStyle = 'rgba(205, 175, 120, 0.12)'; rr(50, 50, 412, 300, 18); ctx.fill();
+              ctx.fillStyle = 'rgba(205, 175, 120, 0.12)'; rr(PX, PY, PW, PH, 18); ctx.fill();
               ctx.save(); ctx.setLineDash([10, 8]); ctx.strokeStyle = 'rgba(150, 115, 60, 0.35)'; ctx.lineWidth = 2;
-              rr(50, 50, 412, 300, 18); ctx.stroke(); ctx.restore();
+              rr(PX, PY, PW, PH, 18); ctx.stroke(); ctx.restore();
             }
           }
 
           // Story text
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          let y = (img || emoji || (opts.reserve && !full)) ? 380 : 110;   // pages with no picture use the whole page for words
+          const picAbove = !full && !!(img || emoji || opts.reserve);
+          let y = picAbove ? PY + PH + 55 : 0;
           // shrink the letters a little if the words would run past the bottom of the page
-          let size = 27, LH = 40, lines;
+          let size = 30, LH = 42, lines;
           for (;;) {
             ctx.font = `700 ${size}px 'Quicksand', sans-serif`;
-            lines = wrapLines(text, 400);
-            const room = full ? 99 : Math.floor((H - 78 - y) / LH) + 1;
+            lines = wrapLines(text, W - 100);
+            const room = full ? 99 : picAbove ? Math.floor((H - 62 - y) / LH) + 1 : Math.floor((H - 120) / LH) + 1;
             if (lines.length <= room || size <= 18) break;
-            size -= 3; LH = Math.round(size * 1.45);
+            size -= 3; LH = Math.round(size * 1.4);
           }
           const hasText = lines.some(l => l.length);
-          if (full) y = Math.max(70, H - 110 - (lines.length - 1) * LH);
+          if (!picAbove) y = (H - (lines.length - 1) * LH) / 2 - 8;           // words only: centred on the page
+          if (full) y = Math.max(70, H - 90 - (lines.length - 1) * LH);
 
           if (full && hasText && !direct) {            // plain panel behind the words
             rr(34, y - 34, W - 68, (lines.length - 1) * LH + 68, 16);
@@ -773,7 +776,7 @@
           });
 
           // Page number
-          const nx = isRightPage ? W - 45 : 45, ny = H - 40;
+          const nx = isRightPage ? W - 42 : 42, ny = H - 30;
           if (full) {
             ctx.beginPath(); ctx.arc(nx, ny, 17, 0, Math.PI * 2); ctx.fillStyle = 'rgba(238, 227, 198, 0.9)'; ctx.fill();
           }
@@ -1018,31 +1021,33 @@
           const panelColor = shadeHex(book.coverColor || '#1e3a8a', 0.4);
           const title = caseText(book, book.title || 'Untitled');
 
-          ctx.font = `bold 34px ${FNT}`;
-          const endY = wrapText(ctx, title, W / 2, 112, 380, 44, { dry: true });
+          ctx.font = `bold 40px ${FNT}`;
+          const endY = wrapText(ctx, title, W / 2, 100, W - 180, 48, { dry: true });
           if (full && !direct && mode === 'color') {   // plain panel behind the title
             ctx.save(); ctx.globalAlpha = 0.9; ctx.fillStyle = panelColor; ctx.fillRect(50, 62, W - 100, endY + 50 - 62); ctx.restore();
             ctx.lineWidth = 2; ctx.strokeRect(50, 62, W - 100, endY + 50 - 62);
           }
           ctx.fillStyle = foil;
-          wrapText(ctx, title, W / 2, 112, 380, 44, { outline });
+          wrapText(ctx, title, W / 2, 100, W - 180, 48, { outline });
           ctx.fillRect(W / 2 - 80, endY + 30, 160, 2); diamond(ctx, W / 2, endY + 31, 6);
 
           if (!full) {
             // Medallion plaque
-            const cy = 355;
-            ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(W / 2, cy, 125, 115, 0, 0, Math.PI * 2); ctx.stroke();
-            ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(W / 2, cy, 114, 104, 0, 0, Math.PI * 2); ctx.stroke();
+            // wide oval between the title and the author
+            const top = endY + 52, bot = H - 132;
+            const cy = (top + bot) / 2, ry = Math.max(60, Math.min(120, (bot - top) / 2)), rx = ry * 1.55;
+            ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(W / 2, cy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+            ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(W / 2, cy, rx - 11, ry - 11, 0, 0, Math.PI * 2); ctx.stroke();
             if (mode === 'color') {
               ctx.fillStyle = 'rgba(0,0,0,0.38)';
-              ctx.beginPath(); ctx.ellipse(W / 2, cy, 112, 102, 0, 0, Math.PI * 2); ctx.fill();
+              ctx.beginPath(); ctx.ellipse(W / 2, cy, rx - 13, ry - 13, 0, 0, Math.PI * 2); ctx.fill();
               const medImg = assets.coverImg || assets.drawImg;
               if (medImg) {
-                ctx.save(); ctx.beginPath(); ctx.ellipse(W / 2, cy, 110, 100, 0, 0, Math.PI * 2); ctx.clip();
-                drawCoverFit(ctx, medImg, W / 2 - 112, cy - 102, 224, 204);
+                ctx.save(); ctx.beginPath(); ctx.ellipse(W / 2, cy, rx - 15, ry - 15, 0, 0, Math.PI * 2); ctx.clip();
+                drawCoverFit(ctx, medImg, W / 2 - rx + 13, cy - ry + 13, (rx - 13) * 2, (ry - 13) * 2);
                 ctx.restore();
               } else {
-                ctx.fillStyle = '#ffffff'; ctx.font = '110px sans-serif';
+                ctx.fillStyle = '#ffffff'; ctx.font = `${Math.round(ry * 1.05)}px sans-serif`;
                 ctx.fillText(book.emoji || '🚀', W / 2, cy + 4);
               }
             }
@@ -1050,23 +1055,23 @@
           }
 
           if (full && !direct && mode === 'color') {   // plain panel behind the author
-            ctx.save(); ctx.globalAlpha = 0.9; ctx.fillStyle = panelColor; ctx.fillRect(90, H - 136, W - 180, 80); ctx.restore();
-            ctx.lineWidth = 2; ctx.strokeRect(90, H - 136, W - 180, 80);
+            ctx.save(); ctx.globalAlpha = 0.9; ctx.fillStyle = panelColor; ctx.fillRect(W / 2 - 220, H - 136, 440, 80); ctx.restore();
+            ctx.lineWidth = 2; ctx.strokeRect(W / 2 - 220, H - 136, 440, 80);
             ctx.fillStyle = foil;
           }
           ctx.fillRect(W / 2 - 70, H - 118, 140, 2);
-          ctx.font = `600 20px ${FNT}`;
+          ctx.font = `600 24px ${FNT}`;
           const au = caseText(book, book.author || '');
           if (outline) { ctx.save(); ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = outline; ctx.strokeText(au, W / 2, H - 84); ctx.restore(); }
           ctx.fillText(au, W / 2, H - 84);
         } else {
-          const cy = 250;
+          const cy = 215;
           ctx.lineWidth = 3;
           ctx.beginPath(); ctx.arc(W / 2, cy, 70, 0, Math.PI * 2); ctx.stroke();
           ctx.beginPath(); ctx.arc(W / 2, cy, 60, 0, Math.PI * 2); ctx.stroke();
           star(ctx, W / 2, cy, 50, 20, 8);
-          ctx.font = `bold 26px ${FNT}`;
-          wrapText(ctx, caseText(book, book.title || 'Untitled'), W / 2, 395, 380, 36);
+          ctx.font = `bold 30px ${FNT}`;
+          wrapText(ctx, caseText(book, book.title || 'Untitled'), W / 2, 345, W - 180, 40);
           ctx.fillRect(W / 2 - 60, H - 126, 120, 2);
           ctx.font = `500 16px ${FNT}`;
           ctx.fillText('STORYBOOK STUDIO EDITION', W / 2, H - 92);
@@ -1076,7 +1081,7 @@
 
       // Returns { map, bumpMap, ormMap } for a front or back cover (repaints itself when a picture finishes loading)
       function makeCover(book, side) {
-        const W = 512, H = 680;
+        const W = 800, H = 600;
         const color = mkCanvas(W, H), bump = mkCanvas(W, H), orm = mkCanvas(W, H);
         const cx = color.getContext('2d'), bx = bump.getContext('2d'), ox = orm.getContext('2d');
         const mapTex = tex(color, { srgb: true }), bumpTex = tex(bump), ormTex = tex(orm);
@@ -1152,7 +1157,7 @@
         ctx.restore();
       }
       function makeSpine(book) {
-        const W = 80, H = 680, K = 1.6;                 // drawn at 1.6x resolution for sharper lettering
+        const W = 80, H = 470, K = 1.6;                 // drawn at 1.6x resolution for sharper lettering
         const mk = () => { const c = mkCanvas(W * K, H * K); c.getContext('2d').scale(K, K); return c; };
         const color = mk(), bump = mk(), orm = mk();
         const cx = color.getContext('2d'), bx = bump.getContext('2d'), ox = orm.getContext('2d');
@@ -1635,7 +1640,7 @@
 
       // Desk: stack of 3 sheets + pen (tap to start a new book)
       const deskPaper = new THREE.Group();
-      const PAPER_HOME = { x: -1.45, y: TABLE_SURFACE_Y + 0.075 + 0.002, z: 0.15, ry: 0.18 };
+      const PAPER_HOME = { x: -1.62, y: TABLE_SURFACE_Y + 0.075 + 0.002, z: 1.5, ry: 0.08 };   // front-left, clear of the wide open book
       deskPaper.position.set(PAPER_HOME.x, PAPER_HOME.y, PAPER_HOME.z);
       deskPaper.rotation.y = PAPER_HOME.ry;
       const sheetCanvas = document.createElement('canvas'); sheetCanvas.width = 512; sheetCanvas.height = 680;
@@ -1777,7 +1782,7 @@
         const leaf = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), leafMats[i % 3]);
         leaf.scale.set(0.06, 0.2 + Math.random() * 0.12, 0.016); leaf.position.y = leaf.scale.y; leaf.castShadow = true; tilt.add(leaf); plant.add(pivot);
       }
-      plant.position.set(-1.8, TOP_Y + 0.002, 1.5); plant.visible = false; scene.add(plant);
+      plant.position.set(-1.75, TOP_Y + 0.002, -0.1); plant.visible = false; scene.add(plant);
 
       // Entrance door (hinged on the left, opens into the room)
       const doorPivot = new THREE.Group();
@@ -1977,8 +1982,9 @@
        ========================================================================= */
 
     // Book Dimensions
-    const BOOK_WIDTH = 0.95;   // Spread page width scale
-    const BOOK_HEIGHT = 1.3;
+    // Landscape (wide) pages, like many picture books: 4:3, matching the 800x600 page pictures
+    const BOOK_WIDTH = 1.2;    // one page's width
+    const BOOK_HEIGHT = 0.9;   // page height (the book's height when standing on the shelf)
     const BOOK_THICKNESS = 0.12;
     // Table top surface = centre (-0.6) + half of its 0.15 thickness; back cover bottom is 0.075 below the book origin
     const BOOK_REST_Y = TABLE_SURFACE_Y + 0.075 + (BOOK_THICKNESS / 2) + 0.015 + 0.002;
@@ -2143,7 +2149,7 @@
       const startX = -((libraryData.length - 1) * shelfSpacing) / 2;
       const posX = startX + (shelfIndex * shelfSpacing);
       const posY = BOOKSHELF_Y + (BOOK_HEIGHT / 2) + 0.06;
-      const posZ = 0.58; // spine near front edge; book body extends back ~0.95 so it's fully on the plank
+      const posZ = 0.66; // spine near the front edge; the book body extends back BOOK_WIDTH and stays on the plank
 
       bookGroup.position.set(posX, posY, posZ);
       
@@ -2871,24 +2877,26 @@
       drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
     }
 
-    drawCanvas.addEventListener('mousedown', (e) => {
+    // Works with finger, pen or mouse; scales for when the pad is shrunk to fit a small screen
+    const padPoint = (e) => {
+      const r = drawCanvas.getBoundingClientRect();
+      return [(e.clientX - r.left) * drawCanvas.width / r.width, (e.clientY - r.top) * drawCanvas.height / r.height];
+    };
+    drawCanvas.addEventListener('pointerdown', (e) => {
       isDrawing = true;
+      try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) {}
       drawCtx.beginPath();
-      const rect = drawCanvas.getBoundingClientRect();
-      drawCtx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+      drawCtx.moveTo(...padPoint(e));
     });
-
-    drawCanvas.addEventListener('mousemove', (e) => {
+    drawCanvas.addEventListener('pointermove', (e) => {
       if (!isDrawing) return;
-      const rect = drawCanvas.getBoundingClientRect();
       drawCtx.strokeStyle = document.getElementById('input-brush-color').value;
       drawCtx.lineWidth = document.getElementById('input-brush-size').value;
-      drawCtx.lineCap = 'round';
-      drawCtx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+      drawCtx.lineCap = 'round'; drawCtx.lineJoin = 'round';
+      drawCtx.lineTo(...padPoint(e));
       drawCtx.stroke();
     });
-
-    window.addEventListener('mouseup', () => { isDrawing = false; });
+    ['pointerup', 'pointercancel'].forEach(ev => drawCanvas.addEventListener(ev, () => { isDrawing = false; }));
 
     // Open Creator Studio
     function openStudio(bookToEdit = null) {
@@ -3420,8 +3428,8 @@
       // Hold the book at a fixed, close distance (so it never reaches the shelf) and
       // shrink it instead so the whole spread fits the screen (phones are narrower)
       const hv = 2 * Math.tan((camera.fov * Math.PI / 180) / 2);
-      const need = isBookOpen ? 2.1 : 1.15;
-      const wantS = Math.min(1, (hv * HOLD_D * 0.9) / 1.45, (hv * camera.aspect * HOLD_D * 0.92) / need);
+      const need = isBookOpen ? BOOK_WIDTH * 2 + 0.2 : BOOK_WIDTH + 0.2;
+      const wantS = Math.min(1, (hv * HOLD_D * 0.9) / (BOOK_HEIGHT + 0.15), (hv * camera.aspect * HOLD_D * 0.92) / need);
       heldS += (wantS - heldS) * 0.1;
       heldD = HOLD_D;
       heldX += (bookCenterX(isBookOpen) * heldS - heldX) * 0.12;
@@ -3713,7 +3721,7 @@
       // Pages with room for a picture: about 150 characters, broken at sentence ends,
       // starting a new page at each paragraph (tiny paragraphs like short dialogue can share)
       const ABBR = /\b(Mr|Mrs|Ms|Dr|St|Mt|Jr|Sr|Capt|Col|Gen|Prof|Rev|No|vs|etc|i\.e|e\.g)\./g;
-      function paginatePictures(paras, maxChars = 150) {
+      function paginatePictures(paras, maxChars = 210) {
         const pages = []; let cur = '';
         const push = () => { if (cur.trim()) pages.push(cur.trim().replace(/\u2024/g, '.')); cur = ''; };
         paras.forEach(raw => {
@@ -3747,7 +3755,7 @@
           id: 'lib-' + idKey, title, author, coverColor: color, spineColor: color, accentColor: '#e6c46a',
           emoji: emoji || (hint ? hint[1] : '📖'), drawingData: null, source,
           style: { leather: 'pebbled', foil: 'shiny', border: 'ornate', spine: 'four', font: 'classic', edges: 'classic' },
-          pages: spreads, pageStyle: pictures ? 'pictures' : (short || verse) ? 'short' : 'long', illustrationSpace: !!pictures
+          pages: spreads, pageStyle: pictures ? 'pictures-wide' : (short || verse) ? 'short' : 'long', illustrationSpace: !!pictures
         };
       }
 
@@ -4326,7 +4334,7 @@
       (function upgradeDownloaded() {
         let changed = false;
         libraryData = libraryData.map(b => {
-          if (!/^(Project Gutenberg|Imported file)/.test(b.source || '') || b.pageStyle === 'pictures') return b;
+          if (!/^(Project Gutenberg|Imported file)/.test(b.source || '') || b.pageStyle === 'pictures-wide') return b;
           if ((b.pages || []).some(p => p.leftImage || p.rightImage)) return b;          // keep books you've decorated
           let texts = [];
           (b.pages || []).forEach(p => texts.push(p.leftText || '', p.rightText || ''));
@@ -4336,7 +4344,7 @@
           if (!texts.length) return b;
           changed = true;
           const nb = Library.makeBook({ idKey: b.id.replace(/^lib-/, ''), title: b.title, author: b.author, paras: texts, cut, source: b.source, pictures: true, emoji: b.emoji });
-          return Object.assign({}, b, { pages: nb.pages, pageStyle: 'pictures', illustrationSpace: true });
+          return Object.assign({}, b, { pages: nb.pages, pageStyle: 'pictures-wide', illustrationSpace: true });
         });
         if (changed) { saveLibrary(libraryData); populateBookshelf(); }
       })();
@@ -4368,6 +4376,16 @@
        9. RESIZE & RENDER LOOP
        ========================================================================= */
 
+    // Standing at the table: back the camera up just enough for the open book to fit the screen
+    const TABLE_LOOK0 = CAMERA_TABLE_LOOK.clone(), TABLE_DIR = new THREE.Vector3(0, 3.7, 3.0).sub(TABLE_LOOK0);
+    const TABLE_DIST0 = TABLE_DIR.length(); TABLE_DIR.normalize();
+    function updateTableCamera() {
+      const halfH = Math.tan((45 * Math.PI / 180) / 2), halfW = halfH * camera.aspect;
+      const dist = Math.max(TABLE_DIST0, (BOOK_WIDTH * 2 + 0.5) / (2 * halfW), (BOOK_HEIGHT + 0.6) / (2 * halfH * 0.55));
+      const pos = TABLE_LOOK0.clone().addScaledVector(TABLE_DIR, dist);
+      STAND_VIEW.tablePos.copy(pos);
+      if (!isSeated) CAMERA_TABLE_POS.copy(pos);
+    }
     let lastW = 0, lastH = 0;
     function fitRenderer() {
       const { w, h } = viewSize();
@@ -4376,6 +4394,7 @@
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      updateTableCamera();
     }
     window.addEventListener('resize', fitRenderer);
     window.addEventListener('orientationchange', () => setTimeout(fitRenderer, 250));
