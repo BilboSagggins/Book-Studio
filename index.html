@@ -1148,37 +1148,71 @@
         // gold rules beside each raised band + head/tail
         spineBands(book).forEach(f => ctx.fillRect(0, f * H + (f < 0.5 ? 17 : -17), W, 2));
         ctx.fillRect(0, 12, W, 2); ctx.fillRect(0, H - 14, W, 2);
-        star(ctx, W / 2, 30, 8, 3, 4); star(ctx, W / 2, H - 30, 8, 3, 4);
+        star(ctx, W / 2, 30, 7, 3, 4); star(ctx, W / 2, H - 30, 7, 3, 4);
 
-        // Title label (tall, dark, framed) and author label
-        const ty0 = 0.15 * H, ty1 = 0.70 * H, ay0 = 0.74 * H, ay1 = 0.85 * H;
+        // Title label (tall, dark, framed) and author label — kept between the raised bands
+        const ty0 = 0.145 * H, ty1 = 0.665 * H, ay0 = 0.69 * H, ay1 = 0.855 * H;
+        const spineBase = book.spineColor || book.coverColor || '#172554';
         if (mode === 'color') {
-          ctx.fillStyle = shadeHex(book.spineColor || book.coverColor || '#172554', 0.38);
-          ctx.fillRect(7, ty0, W - 14, ty1 - ty0);
-          ctx.fillRect(12, ay0, W - 24, ay1 - ay0);
+          ctx.fillStyle = shadeHex(spineBase, 0.3);
+          ctx.fillRect(5, ty0, W - 10, ty1 - ty0);
+          ctx.fillRect(8, ay0, W - 16, ay1 - ay0);
         }
         ctx.fillStyle = foil;
-        ctx.lineWidth = 2; ctx.strokeRect(7, ty0, W - 14, ty1 - ty0);
-        ctx.lineWidth = 1; ctx.strokeRect(11, ty0 + 4, W - 22, ty1 - ty0 - 8);
-        ctx.lineWidth = 1.5; ctx.strokeRect(12, ay0, W - 24, ay1 - ay0);
+        ctx.lineWidth = 2; ctx.strokeRect(5, ty0, W - 10, ty1 - ty0);
+        ctx.lineWidth = 1.5; ctx.strokeRect(8, ay0, W - 16, ay1 - ay0);
 
-        const drawLabel = (text, cy, weight, maxPx, maxLen, minPx) => {
+        // Lettering: solid, bright and outlined (no shine or pressing) so it reads from across the room
+        const ink = mixHex(accent, '#ffffff', 0.6);
+        const textW = (weight, px, t) => { ctx.font = `${weight} ${px}px ${FNT}`; return ctx.measureText(t).width; };
+        // best size for `lines` laid side by side across the spine, each running along `len` pixels
+        const sizeFor = (lines, weight, maxPx, across, len) => {
+          const byWidth = across / (lines.length * 1.12);
+          const byLength = Math.min(...lines.map(l => maxPx * len / Math.max(1, textW(weight, maxPx, l))));
+          return Math.min(maxPx, byWidth, byLength);
+        };
+        const drawLines = (lines, cy, weight, px) => {
+          if (mode === 'bump') return;                             // letters stay flat (no shadowy pressing)
           ctx.save();
           ctx.translate(W / 2, cy); ctx.rotate(Math.PI / 2);      // reads top-to-bottom
-          fitFont(ctx, text, weight, maxPx, maxLen, minPx, FNT);
-          if (mode === 'color') {                                  // dark outline keeps the letters crisp
-            ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.lineWidth = 3.5; ctx.strokeText(text, 0, 1);
-          }
-          ctx.fillStyle = textFoil;
-          ctx.fillText(text, 0, 1);
+          try { ctx.letterSpacing = '0px'; } catch (e) {}
+          ctx.font = `${weight} ${px}px ${FNT}`;
+          const gap = px * 1.12, off = -(lines.length - 1) * gap / 2;
+          lines.forEach((l, i) => {
+            // the letters' tops face the same side for every line, so line 1 goes on that side
+            const yy = off + i * gap + px * 0.04;
+            if (mode === 'color') { ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = Math.max(2, px * 0.16); ctx.strokeText(l, 0, yy); }
+            ctx.fillStyle = mode === 'color' ? ink : 'rgb(0,200,0)';   // metal pass: matte, not shiny
+            ctx.fillText(l, 0, yy);
+          });
           ctx.restore();
         };
-        drawLabel(caseText(book, book.title || 'Storybook'), (ty0 + ty1) / 2, 'bold', 32, ty1 - ty0 - 26, 12);
-        drawLabel(caseText(book, book.author || ''), (ay0 + ay1) / 2, '600', 15, ay1 - ay0 - 12, 9);
+        const fitAndDraw = (text, y0, y1, weight, maxPx, inset) => {
+          const across = W - inset * 2, len = (y1 - y0) - 14;
+          const one = [text];
+          const words = text.split(/\s+/);
+          let two = null;
+          if (words.length > 1) {                                  // best place to split into two lines
+            let best = Infinity;
+            for (let k = 1; k < words.length; k++) {
+              const a = words.slice(0, k).join(' '), b = words.slice(k).join(' ');
+              const w = Math.max(textW(weight, 20, a), textW(weight, 20, b));
+              if (w < best) { best = w; two = [a, b]; }
+            }
+          }
+          const s1 = sizeFor(one, weight, maxPx, across, len);
+          const s2 = two ? sizeFor(two, weight, maxPx, across, len) : 0;
+          if (s2 > s1 * 1.15) drawLines(two, (y0 + y1) / 2, weight, s2);
+          else drawLines(one, (y0 + y1) / 2, weight, s1);
+        };
+        fitAndDraw(caseText(book, book.title || 'Storybook'), ty0, ty1, 'bold', 40, 9);
+        let author = String(book.author || '').trim();
+        if (author.length > 12 && author.includes(' ')) author = author.replace(/\s*\(.*\)\s*$/, '').split(' ').pop();   // surname when the full name won't fit
+        if (author) fitAndDraw(caseText(book, author), ay0, ay1, 'bold', 22, 11);
         ctx.restore();
       }
       function makeSpine(book) {
-        const W = 80, H = 470, K = 1.6;                 // drawn at 1.6x resolution for sharper lettering
+        const W = 100, H = 600, K = 2.5;                // drawn at 2.5x resolution for sharp lettering (100:600 matches the spine's shape)
         const mk = () => { const c = mkCanvas(W * K, H * K); c.getContext('2d').scale(K, K); return c; };
         const color = mk(), bump = mk(), orm = mk();
         const cx = color.getContext('2d'), bx = bump.getContext('2d'), ox = orm.getContext('2d');
@@ -1192,7 +1226,7 @@
         drawSpineArt(ox, book, 'metal', W, H);
         // roundness shading across the spine (kept light so the title stays readable)
         const g = cx.createLinearGradient(0, 0, W, 0);
-        g.addColorStop(0, 'rgba(0,0,0,0.28)'); g.addColorStop(0.5, 'rgba(255,255,255,0.04)'); g.addColorStop(1, 'rgba(0,0,0,0.28)');
+        g.addColorStop(0, 'rgba(0,0,0,0.22)'); g.addColorStop(0.12, 'rgba(0,0,0,0)'); g.addColorStop(0.88, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.22)');
         cx.fillStyle = g; cx.fillRect(0, 0, W, H);
         return { map: tex(color, { srgb: true }), bumpMap: tex(bump), ormMap: tex(orm) };
       }
@@ -2006,7 +2040,8 @@
     // Landscape (wide) pages, like many picture books: 4:3, matching the 800x600 page pictures
     const BOOK_WIDTH = 1.2;    // one page's width
     const BOOK_HEIGHT = 0.9;   // page height (the book's height when standing on the shelf)
-    const BOOK_THICKNESS = 0.12;
+    const BOOK_THICKNESS = 0.15;   // a bit chunkier, so the spine is wide enough to read
+    const STACK_ZB = -(BOOK_THICKNESS / 2 - 0.015), STACK_T = BOOK_THICKNESS * 0.3;   // open page stacks
     // Table top surface = centre (-0.6) + half of its 0.15 thickness; back cover bottom is 0.075 below the book origin
     const BOOK_REST_Y = TABLE_SURFACE_Y + 0.075 + (BOOK_THICKNESS / 2) + 0.015 + 0.002;
 
@@ -2076,6 +2111,14 @@
       );
       spineMesh.scale.x = 0.35;
       spineMesh.castShadow = true;
+      // Spread the spine picture evenly across the spine's width (by default it bunches up at the
+      // curved edges, which squeezed the letters)
+      {
+        const g = spineMesh.geometry, pos = g.attributes.position, uv = g.attributes.uv, R = BOOK_THICKNESS / 2;
+        const sideCount = (28 + 1) * (1 + 1);                    // side vertices come first: (radial+1) x (height+1)
+        for (let k = 0; k < sideCount; k++) uv.setX(k, (pos.getZ(k) + R) / (2 * R));
+        uv.needsUpdate = true;
+      }
       const spineGroup = new THREE.Group();   // curved spine + raised bands (flattens when the book lies open)
       spineGroup.add(spineMesh);
       bookGroup.add(spineGroup);
@@ -2099,11 +2142,11 @@
 
       // Page stacks visible while open: right stack rests on the BACK cover, left stack on the front cover
       const STACK_W = BOOK_WIDTH - 0.05, STACK_H = BOOK_HEIGHT - 0.07;
-      const rightBlock = Realism.pageBlock(STACK_W, STACK_H, 0.036, bookStyle.edges, baseLeather);
-      rightBlock.position.set(0.02 + STACK_W / 2, 0, -0.045 + 0.018);
-      const leftBlock = Realism.pageBlock(STACK_W, STACK_H, 0.036, bookStyle.edges, baseLeather);
+      const rightBlock = Realism.pageBlock(STACK_W, STACK_H, STACK_T, bookStyle.edges, baseLeather);
+      rightBlock.position.set(0.02 + STACK_W / 2, 0, STACK_ZB + STACK_T / 2);
+      const leftBlock = Realism.pageBlock(STACK_W, STACK_H, STACK_T, bookStyle.edges, baseLeather);
       leftBlock.rotation.y = Math.PI; // fore-edge faces outward on the left
-      leftBlock.position.set(-(0.02 + STACK_W / 2), 0, -0.045 + 0.018);
+      leftBlock.position.set(-(0.02 + STACK_W / 2), 0, STACK_ZB + STACK_T / 2);
       rightBlock.visible = leftBlock.visible = false;
       bookGroup.add(rightBlock, leftBlock);
       bookGroup.userData.rightBlock = rightBlock;
@@ -2410,7 +2453,7 @@
     // Positions the two page stacks and every leaf for a given number of turned leaves
     function layoutStacks(book, turned, dur) {
       const ud = book.userData, leaves = ud.pageLeaves, N = Math.max(1, leaves.length);
-      const ZB = -0.045, T = 0.036, ease = 'power2.inOut';
+      const ZB = STACK_ZB, T = STACK_T, ease = 'power2.inOut';
       const tR = Math.max(0.0001, T * (1 - turned / N));
       const tL = Math.max(0.0001, T * turned / N);
       if (turned > 0) ud.leftBlock.visible = true;
@@ -2461,8 +2504,8 @@
         book.userData.setPageWindow(0);
         // Right stack (under the back cover's pages) appears at full size at once; the left stack stays hidden until a page is turned
         const rb = book.userData.rightBlock, lb = book.userData.leftBlock;
-        rb.scale.z = 1; rb.position.z = -0.045 + 0.018; rb.visible = true;
-        lb.scale.z = 0.0028; lb.position.z = -0.045; lb.visible = false;
+        rb.scale.z = 1; rb.position.z = STACK_ZB + STACK_T / 2; rb.visible = true;
+        lb.scale.z = 0.0028; lb.position.z = STACK_ZB; lb.visible = false;
         currentSpreadIndex = 0;
         layoutStacks(book, 0, 0.3);
         leaves.forEach(leaf => gsap.to(leaf.rotation, { y: 0, duration: 0.5 }));
