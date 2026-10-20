@@ -322,6 +322,18 @@
             </div>
           </div>
 
+          <!-- Book-wide picture style -->
+          <div id="book-layout-controls" class="flex flex-wrap items-center justify-between gap-2 bg-slate-900 p-3 rounded-2xl border border-slate-800">
+            <div>
+              <div class="text-xs font-bold text-slate-300 uppercase tracking-wider">Pictures on every page</div>
+              <div class="text-[11px] text-slate-500">Each page can still choose its own style below.</div>
+            </div>
+            <div class="flex gap-2">
+              <button type="button" data-booklayout="above" class="px-3 py-1.5 rounded-lg text-xs font-semibold border">Above the text</button>
+              <button type="button" data-booklayout="full" class="px-3 py-1.5 rounded-lg text-xs font-semibold border">Full page</button>
+            </div>
+          </div>
+
           <!-- Page Pair Editor (Left Page vs Right Page) -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <!-- Left Page Editor -->
@@ -710,7 +722,10 @@
         const paint = () => {
           const img = opts.image ? Realism.getImage(opts.image, () => { paint(); texture.needsUpdate = true; }) : null;
           const full = !!img && opts.layout === 'full';
-          const direct = opts.textBg === 'direct';
+          // no picture yet, but the page is set to full-page: keep the whole page free for one
+          const reserveFull = !img && !emoji && !!opts.reserve && opts.layout === 'full';
+          const fullLike = full || reserveFull;
+          const direct = full && opts.textBg === 'direct';
 
           // Warm cream paper
           ctx.fillStyle = '#eee3c6';
@@ -722,8 +737,14 @@
           ctx.lineWidth = 2;
           ctx.strokeRect(25, 25, W - 50, H - 50);
 
+          if (reserveFull) {                             // empty full-page frame for an illustration
+            ctx.fillStyle = 'rgba(205, 175, 120, 0.12)'; rr(40, 40, W - 80, H - 80, 20); ctx.fill();
+            ctx.save(); ctx.setLineDash([10, 8]); ctx.strokeStyle = 'rgba(150, 115, 60, 0.35)'; ctx.lineWidth = 2;
+            rr(40, 40, W - 80, H - 80, 20); ctx.stroke(); ctx.restore();
+          }
+
           // Illustration: your picture, otherwise the emoji
-          if (!full) {
+          if (!fullLike) {
             if (img) {
               ctx.save(); rr(PX, PY, PW, PH, 18); ctx.clip();
               Realism.drawCoverFit(ctx, img, PX, PY, PW, PH); ctx.restore();
@@ -743,22 +764,22 @@
 
           // Story text
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          const picAbove = !full && !!(img || emoji || opts.reserve);
+          const picAbove = !fullLike && !!(img || emoji || opts.reserve);
           let y = picAbove ? PY + PH + 55 : 0;
           // shrink the letters a little if the words would run past the bottom of the page
           let size = 30, LH = 42, lines;
           for (;;) {
             ctx.font = `700 ${size}px 'Quicksand', sans-serif`;
             lines = wrapLines(text, W - 100);
-            const room = full ? 99 : picAbove ? Math.floor((H - 62 - y) / LH) + 1 : Math.floor((H - 120) / LH) + 1;
+            const room = fullLike ? 4 : picAbove ? Math.floor((H - 62 - y) / LH) + 1 : Math.floor((H - 120) / LH) + 1;
             if (lines.length <= room || size <= 18) break;
             size -= 3; LH = Math.round(size * 1.4);
           }
           const hasText = lines.some(l => l.length);
           if (!picAbove) y = (H - (lines.length - 1) * LH) / 2 - 8;           // words only: centred on the page
-          if (full) y = Math.max(70, H - 90 - (lines.length - 1) * LH);
+          if (fullLike) y = Math.max(70, H - 90 - (lines.length - 1) * LH);
 
-          if (full && hasText && !direct) {            // plain panel behind the words
+          if (fullLike && hasText && !direct) {        // plain panel behind the words
             rr(34, y - 34, W - 68, (lines.length - 1) * LH + 68, 16);
             ctx.fillStyle = 'rgba(238, 227, 198, 0.92)'; ctx.fill();
             ctx.strokeStyle = 'rgba(217, 119, 6, 0.4)'; ctx.lineWidth = 2; ctx.stroke();
@@ -777,7 +798,7 @@
 
           // Page number
           const nx = isRightPage ? W - 42 : 42, ny = H - 30;
-          if (full) {
+          if (fullLike) {
             ctx.beginPath(); ctx.arc(nx, ny, 17, 0, Math.PI * 2); ctx.fillStyle = 'rgba(238, 227, 198, 0.9)'; ctx.fill();
           }
           ctx.fillStyle = '#6b5b45';
@@ -2109,8 +2130,8 @@
         if (m.map) m.map.dispose(); m.dispose();
         const k = pageMats.indexOf(m); if (k >= 0) pageMats.splice(k, 1);
       };
-      const leftTex = i => { const d = bookData.pages[i]; return TextureGenerator.createPageTexture(d.leftText, d.leftEmoji, i * 2 + 1, false, { image: d.leftImage, layout: d.leftLayout, textBg: d.leftTextBg, reserve }); };
-      const rightTex = i => { const d = bookData.pages[i]; return TextureGenerator.createPageTexture(d.rightText, d.rightEmoji, i * 2 + 2, true, { image: d.rightImage, layout: d.rightLayout, textBg: d.rightTextBg, reserve }); };
+      const leftTex = i => { const d = bookData.pages[i]; return TextureGenerator.createPageTexture(d.leftText, d.leftEmoji, i * 2 + 1, false, { image: d.leftImage, layout: d.leftLayout || bookData.pageLayout, textBg: d.leftTextBg, reserve }); };
+      const rightTex = i => { const d = bookData.pages[i]; return TextureGenerator.createPageTexture(d.rightText, d.rightEmoji, i * 2 + 2, true, { image: d.rightImage, layout: d.rightLayout || bookData.pageLayout, textBg: d.rightTextBg, reserve }); };
       const frontTex = i => i === 0 ? TextureGenerator.createTitlePageTexture(bookData) : rightTex(i - 1);   // +z: seen on the right before turning
       const backTex = i => i < numSpreads ? leftTex(i) : TextureGenerator.createTitlePageTexture(bookData, true); // -z: seen on the left after turning
 
@@ -3243,7 +3264,7 @@
         const t = c.target(); if (!file || !t) return;
         readImageFile(file, (dataUrl) => {
           t[c.keys.image] = dataUrl;
-          if (!t[c.keys.layout]) t[c.keys.layout] = c.layoutDefault;
+          if (!t[c.keys.layout] && name === 'cover') t[c.keys.layout] = c.layoutDefault;   // pages follow the book-wide setting
           if (!t[c.keys.bg]) t[c.keys.bg] = 'plain';
           refreshImageControls();
         });
@@ -3256,12 +3277,25 @@
       });
     });
 
+    document.getElementById('book-layout-controls').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-booklayout]');
+      if (!b || !editingBookData) return;
+      editingBookData.pageLayout = b.dataset.booklayout;
+      // pages that matched the old book-wide style follow the new one
+      editingBookData.pages.forEach(pg => { delete pg.leftLayout; delete pg.rightLayout; });
+      refreshImageControls();
+    });
     function refreshImageControls() {
-      Object.values(IMG_CTLS).forEach(c => {
+      const bl = (editingBookData && editingBookData.pageLayout) || 'above';
+      document.querySelectorAll('[data-booklayout]').forEach(b => {
+        const on = b.dataset.booklayout === bl;
+        SEG_ON.forEach(k => b.classList.toggle(k, on)); SEG_OFF.forEach(k => b.classList.toggle(k, !on));
+      });
+      Object.entries(IMG_CTLS).forEach(([name, c]) => {
         const root = document.getElementById(c.host), t = c.target();
         if (!root || !t) return;
         const has = !!t[c.keys.image];
-        const layout = t[c.keys.layout] || c.layoutDefault, bg = t[c.keys.bg] || 'plain';
+        const layout = t[c.keys.layout] || (name !== 'cover' && editingBookData.pageLayout) || c.layoutDefault, bg = t[c.keys.bg] || 'plain';
         const thumb = root.querySelector('[data-role="thumb"]');
         thumb.classList.toggle('hidden', !has); if (has) thumb.src = t[c.keys.image];
         root.querySelector('[data-role="remove"]').classList.toggle('hidden', !has);
