@@ -1559,7 +1559,7 @@
     const ROOM_DEFAULTS = { wallColor: '#233349', wallPattern: 'damask', wood: '#7a3d14', floor: '#4a2e1a', rug: '#5b1a1f', mood: 'evening', brightness: 1, lamp: true, pageBrightness: 0.6,
       floorStyle: 'planks', rugStyle: 'medallion', ceiling: '#cfc8b8', shade: '#1f5f4a', cushion: '#7a2a2a',
       window: false, wainscot: true, globe: false, plant: false,
-      wallArt: {}, frameStyle: 'gold', clock: false, lights: false, holidays: {}, holidayPreview: 'auto' };
+      wallArt: {}, frameStyle: 'gold', clock: false, lights: false, holidays: {}, holidayPreview: 'auto', fireplace: false, fireLit: true };
     let roomSettings = { ...ROOM_DEFAULTS };
     let activeHoliday = null;   // the holiday being decorated for right now (set by the holiday section below)
     try { Object.assign(roomSettings, JSON.parse(localStorage.getItem(ROOM_KEY) || '{}')); } catch (e) {}
@@ -1837,10 +1837,10 @@
         const hol = activeHoliday;
         panes.forEach(({ cv, tx }, wi) => {
           const c = cv.getContext('2d');
-          const sky = { evening: ['#2b3a67', '#ff9a55'], daylight: ['#6fb7f5', '#e3f3ff'], candle: ['#07080d', '#14101a'], moonlit: ['#070d28', '#2b4a8c'] }[mood] || ['#2b3a67', '#ff9a55'];
+          const sky = { evening: ['#2b3a67', '#ff9a55'], daylight: ['#6fb7f5', '#e3f3ff'], candle: ['#07080d', '#14101a'], fireside: ['#07080d', '#1a1220'], moonlit: ['#070d28', '#2b4a8c'] }[mood] || ['#2b3a67', '#ff9a55'];
           const g = c.createLinearGradient(0, 0, 0, 256); g.addColorStop(0, sky[0]); g.addColorStop(1, sky[1]);
           c.fillStyle = g; c.fillRect(0, 0, 128, 256);
-          if (mood === 'moonlit' || mood === 'candle') {
+          if (mood === 'moonlit' || mood === 'candle' || mood === 'fireside') {
             for (let i = 0; i < 24; i++) { c.fillStyle = 'rgba(255,255,255,0.8)'; c.fillRect(Math.random() * 128, Math.random() * 150, 1.5, 1.5); }
             if (mood === 'moonlit' && wi === 0) { c.fillStyle = '#fff6d0'; c.beginPath(); c.arc(86, 62, 16, 0, Math.PI * 2); c.fill(); }   // one moon
           }
@@ -1975,6 +1975,7 @@
     const ROOM_MOODS = {
       evening:  { bg: '#0f172a', amb: 0.3,  hemi: 0.55, hemiSky: '#ffe9c8', spot: 2.2, spotCol: '#fef3c7', fill: 0.8, fillCol: '#f59e0b', rim: 0.5, rimCol: '#38bdf8', exp: 1.15, lamp: 1.1 },
       daylight: { bg: '#9db4c9', amb: 0.55, hemi: 0.9,  hemiSky: '#ffffff', spot: 2.0, spotCol: '#fffaf0', fill: 0.3, fillCol: '#fff1d6', rim: 0.3, rimCol: '#ffffff', exp: 1.2,  lamp: 0.3 },
+      fireside: { bg: '#070504', amb: 0.06, hemi: 0.12, hemiSky: '#ffb070', spot: 0.35, spotCol: '#ffcf99', fill: 0.35, fillCol: '#ff7a2a', rim: 0.05, rimCol: '#ff9a4a', exp: 1.1, lamp: 0.55 },
       candle:   { bg: '#0a0705', amb: 0.12, hemi: 0.22, hemiSky: '#ffb870', spot: 0.9, spotCol: '#ffcf99', fill: 1.3, fillCol: '#ff8f2e', rim: 0.15, rimCol: '#ff9a4a', exp: 1.05, lamp: 1.8 },
       moonlit:  { bg: '#070b17', amb: 0.22, hemi: 0.4,  hemiSky: '#a9c0ff', spot: 1.2, spotCol: '#b9ccff', fill: 0.25, fillCol: '#6f8cff', rim: 0.9, rimCol: '#8ab4ff', exp: 1.1,  lamp: 1.0 }
     };
@@ -3007,7 +3008,7 @@
     /* ---------- Room customization panel ---------- */
     (function buildRoomPanel() {
       const SECTIONS = [
-        { title: 'Mood', key: 'mood', type: 'pills', options: [['evening', 'Evening'], ['daylight', 'Daylight'], ['candle', 'Candlelight'], ['moonlit', 'Moonlit']] },
+        { title: 'Mood', key: 'mood', type: 'pills', options: [['evening', 'Evening'], ['daylight', 'Daylight'], ['candle', 'Candlelight'], ['moonlit', 'Moonlit'], ['fireside', 'Fireside']] },
         { title: 'Wall color', key: 'wallColor', type: 'swatch', options: [['#233349', 'Navy'], ['#2c4a3a', 'Forest'], ['#5a2a33', 'Burgundy'], ['#3a3b42', 'Charcoal'], ['#6f8570', 'Sage'], ['#d9cfbd', 'Cream']] },
         { title: 'Wallpaper', key: 'wallPattern', type: 'pills', options: [['damask', 'Damask'], ['stripes', 'Stripes'], ['plain', 'Plain']] },
         { title: 'Ceiling', key: 'ceiling', type: 'swatch', options: [['#cfc8b8', 'Cream'], ['#f1efe9', 'White'], ['#7a6a55', 'Tan'], ['#3a3a44', 'Charcoal']] },
@@ -3580,13 +3581,94 @@
           [[0.5, 0.35, 0.45, '#c0182a', '#d4af37', 0.6, 0.5], [0.4, 0.3, 0.4, '#1f6b3a', '#ffffff', -0.2, 0.9], [0.35, 0.45, 0.35, '#2b6fd6', '#c0c0c0', 0.9, 0.0], [0.3, 0.22, 0.3, '#d4af37', '#c0182a', 0.3, 1.1]].forEach(([w, h, d, c, r, dx, dz]) => g.add(at(gift(w, h, d, c, r), FL[0] + dx, FLOOR, FL[1] + dz, rnd(-0.4, 0.4))));
           g.add(cord(sagPoints(SHELF_A, SHELF_B, 0.34), '#1f5a32', 0.05));
           g.add(bulbString(V(SHELF_A.x, SHELF_A.y - 0.02, SHELF_A.z + 0.04), V(SHELF_B.x, SHELF_B.y - 0.02, SHELF_B.z + 0.04), 0.34, 18, ['#ff4d4d', '#ffd84d', '#4dd2ff', '#7dff6a']));
-          [-1.4, 0, 1.4].forEach((x, i) => g.add(at(stocking(['#c0182a', '#1f6b3a', '#c0182a'][i]), x, SHELF_TOP - 0.1, 0.84)));
+          if (roomSettings.fireplace) [-0.8, 0, 0.8].forEach((dz, i) => g.add(at(stocking(['#c0182a', '#1f6b3a', '#c0182a'][i]), -RW + 0.63, FLOOR + 0.08 + 2.28, FIRE_Z + dz, Math.PI / 2)));
+          else [-1.4, 0, 1.4].forEach((x, i) => g.add(at(stocking(['#c0182a', '#1f6b3a', '#c0182a'][i]), x, SHELF_TOP - 0.1, 0.84)));
           g.add(at(wreath(), 0, 3.4, FRONT - 0.06, Math.PI));             // above the door (turn around)
           [[0.45, 0.3, 0.45, '#c0182a', '#ffffff'], [0.35, 0.4, 0.35, '#d4af37', '#c0182a']].forEach(([w, h, d, c, r], i) => g.add(at(gift(w, h, d, c, r), FR[0] - i * 0.55, FLOOR, FR[1] + i * 0.2, rnd(-0.4, 0.4))));
         }
       };
 
       /* ---------- putting it in the room ---------- */
+      /* ---------- fireplace on the left wall, beside the reading chair ---------- */
+      const FIRE_Z = 3.4;                                    // along the left wall
+      const fireLight = new THREE.PointLight('#ff8a3a', 0, 14, 1.4);   // always in the scene (switching lights on/off is then instant)
+      fireLight.position.set(-RW + 0.75, FLOOR + 0.65, FIRE_Z);
+      scene.add(fireLight);
+      const flames = [];
+      function brickTexture() {
+        const c = mkC(256, 256), x = c.getContext('2d');
+        x.fillStyle = '#b9b2a6'; x.fillRect(0, 0, 256, 256);
+        const rows = 8, bh = 256 / rows, bw = 64;
+        for (let r = 0; r < rows; r++) for (let k = -1; k < 5; k++) {
+          const ox = (r % 2) * bw / 2; x.fillStyle = pick(['#8a3b2a', '#9b4430', '#7a3424', '#a14d36', '#8f3f2c']);
+          x.fillRect(k * bw + ox + 3, r * bh + 3, bw - 6, bh - 6);
+          for (let i = 0; i < 25; i++) { x.fillStyle = `rgba(0,0,0,${rnd(0.03, 0.1)})`; x.fillRect(k * bw + ox + rnd(3, bw - 6), r * bh + rnd(3, bh - 6), 2, 2); }
+        }
+        const t = ctex(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+      }
+      function flameTexture() {
+        const c = mkC(128, 256), x = c.getContext('2d');
+        const blob = (cx, cy, rx, ry, inner, outer) => { const g = x.createRadialGradient(cx, cy, 0, cx, cy, ry); g.addColorStop(0, inner); g.addColorStop(1, outer); x.fillStyle = g; x.save(); x.translate(cx, cy); x.scale(rx / ry, 1); x.translate(-cx, -cy); x.beginPath(); x.arc(cx, cy, ry, 0, Math.PI * 2); x.fill(); x.restore(); };
+        blob(64, 170, 44, 90, 'rgba(255,120,30,0.9)', 'rgba(255,60,0,0)');
+        blob(64, 190, 30, 60, 'rgba(255,200,80,0.95)', 'rgba(255,120,20,0)');
+        blob(64, 205, 16, 34, 'rgba(255,250,210,1)', 'rgba(255,200,80,0)');
+        return ctex(c);
+      }
+      function buildFireplace() {
+        const g = new THREE.Group();
+        const bricks = brickTexture(), brick = (rx, ry) => { const t = bricks.clone(); t.repeat.set(rx, ry); t.needsUpdate = true; return new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 }); };
+        const stone = std('#6f6a63', { roughness: 0.85 }), soot = std('#161211', { roughness: 1 }), iron = std('#1c1c1f', { metalness: 0.6, roughness: 0.5 });
+        const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.receiveShadow = true; g.add(m); return m; };
+        const H0 = FLOOR + 0.08;                             // top of the hearth
+        add(new THREE.BoxGeometry(3.0, 0.08, 1.0), stone, 0, FLOOR + 0.04, 0.5);                      // hearth
+        [-1, 1].forEach(sx => add(new THREE.BoxGeometry(0.55, 2.3, 0.5), brick(1, 4), sx * 1.025, H0 + 1.15, 0.25));   // sides
+        add(new THREE.BoxGeometry(2.6, 0.6, 0.5), brick(4, 1), 0, H0 + 2.0, 0.25);                    // above the opening
+        add(new THREE.BoxGeometry(3.0, 0.12, 0.62), std('#5a3218', { roughness: 0.55 }), 0, H0 + 2.36, 0.31);   // mantel
+        add(new THREE.BoxGeometry(1.5, 1.7, 0.04), soot, 0, H0 + 0.85, 0.02);                         // inside of the firebox
+        [-1, 1].forEach(sx => add(new THREE.BoxGeometry(0.04, 1.7, 0.48), soot, sx * 0.73, H0 + 0.85, 0.25));
+        add(new THREE.BoxGeometry(1.5, 0.04, 0.48), soot, 0, H0 + 1.7, 0.25);
+        for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.03, 0.03, 0.4), iron, -0.4 + i * 0.2, H0 + 0.08, 0.27);   // grate
+        add(new THREE.BoxGeometry(0.9, 0.03, 0.03), iron, 0, H0 + 0.08, 0.45);
+        const bark = std('#4a2e18', { roughness: 0.95 });
+        [[-0.12, 0.17, 0.2, 0.15], [0.12, 0.17, 0.32, -0.12], [0, 0.31, 0.26, 0.05]].forEach(([x, y, z, ry]) => { const l = add(new THREE.CylinderGeometry(0.08, 0.085, 0.95, 12), bark, x, H0 + y, z); l.rotation.set(0, ry, Math.PI / 2); });
+        const embers = add(new THREE.BoxGeometry(0.8, 0.04, 0.32), glow('#ff5a1a', 1.5), 0, H0 + 0.11, 0.27);
+        const ftex = flameTexture();
+        flames.length = 0;
+        [[-0.22, 0.6, 0.7], [0.05, 0.75, 0.85], [0.28, 0.55, 0.65], [0, 0.5, 1.0]].forEach(([x, w, h], i) => {
+          const f = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: ftex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+          f.position.set(x, H0 + 0.25 + h / 2, 0.26 + (i % 2) * 0.04); f.rotation.y = (i - 1.5) * 0.35;
+          f.userData = { phase: rnd(0, 6), h, baseY: f.position.y, x };
+          g.add(f); flames.push(f);
+        });
+        g.userData.fire = [embers, ...flames];
+        g.rotation.y = Math.PI / 2; g.position.set(-RW, 0, FIRE_Z);
+        return g;
+      }
+      const fireGroup = new THREE.Group(); scene.add(fireGroup);
+      function buildFire() {
+        disposeGroup(fireGroup); flames.length = 0;
+        if (roomSettings.fireplace) fireGroup.add(buildFireplace());
+        setFireVisible();
+      }
+      function setFireVisible() {
+        const lit = !!(roomSettings.fireplace && roomSettings.fireLit);
+        fireGroup.traverse(o => { if (o.userData && o.userData.fire) o.userData.fire.forEach(m => { m.visible = lit; }); });
+        if (!lit) fireLight.intensity = 0;
+      }
+      function updateFire(t) {
+        if (!(roomSettings.fireplace && roomSettings.fireLit)) return;
+        const base = roomSettings.mood === 'fireside' ? 2.8 : 1.6;
+        fireLight.intensity = base * (0.82 + Math.sin(t * 7.3) * 0.08 + Math.sin(t * 13.7 + 1.3) * 0.06 + Math.sin(t * 3.1) * 0.04);
+        flames.forEach(f => {
+          const p = f.userData.phase;
+          const sy = 0.85 + Math.sin(t * 6 + p) * 0.12 + Math.sin(t * 11 + p * 2) * 0.06;
+          f.scale.set(1 + Math.sin(t * 4 + p) * 0.06, sy, 1);
+          f.position.y = f.userData.baseY - (1 - sy) * f.userData.h / 2;
+          f.position.x = f.userData.x + Math.sin(t * 3 + p) * 0.02;
+          f.material.opacity = 0.85 + Math.sin(t * 9 + p) * 0.15;
+        });
+      }
+
       const wallGroup = new THREE.Group(), extrasGroup = new THREE.Group(), holidayGroup = new THREE.Group();
       scene.add(wallGroup, extrasGroup, holidayGroup);
       let builtHoliday = null;
@@ -3645,7 +3727,7 @@
         if (roomRefs.paintWindow) roomRefs.paintWindow(roomSettings.mood);
         if (ui.status) ui.status();
       }
-      function refresh() { buildWalls(); buildExtras(); buildHoliday(true); if (ui.sync) ui.sync(); }
+      function refresh() { buildWalls(); buildExtras(); buildFire(); buildHoliday(true); if (ui.sync) ui.sync(); }
 
       // movement: bobbing balloons, floating ghost, twinkling bulbs, ticking clock
       let lastCheck = 0;
@@ -3657,6 +3739,7 @@
           }
           else if (o.userData.twinkle != null) o.material.emissiveIntensity = 1.1 + Math.sin(t * 2.2 + o.userData.twinkle) * 0.6;
         }
+        updateFire(t);
         if (t - lastCheck > 20) { lastCheck = t; if (clock) clock.userData.tick(); buildHoliday(false); }   // a new day may start a new holiday
       }
 
@@ -3677,6 +3760,9 @@
             <div class="flex flex-wrap gap-2 mb-2">${Object.keys(FRAME_STYLES).map(k => `<button data-frame="${k}" class="px-3 py-1.5 rounded-lg text-xs font-semibold border capitalize">${k}</button>`).join('')}</div>
             <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold">Wall clock</span><button data-dtoggle="clock" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"></button></div>
             <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold">String lights</span><button data-dtoggle="lights" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"></button></div>
+            <div class="flex items-center justify-between mb-2"><span class="text-xs font-semibold">Fireplace <span class="text-slate-500 font-normal">(left wall)</span></span><button data-dtoggle="fireplace" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"></button></div>
+            <div data-fire-row class="flex items-center justify-between mb-2"><span class="text-xs font-semibold">Fire lit</span><button data-dtoggle="fireLit" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"></button></div>
+            <div data-fire-row class="text-[11px] text-slate-500 mb-2">Tip: choose the <b>Fireside</b> mood at the top to make the fire the room’s main, soft light.</div>
             <input id="decor-photo" type="file" accept="image/*" class="hidden">
           </div>
           <div class="mb-3 pt-3 border-t border-slate-700/60">
@@ -3697,6 +3783,7 @@
           box.querySelectorAll('[data-dtoggle]').forEach(b => { const on = !!roomSettings[b.dataset.dtoggle]; paint(b, on, on ? 'On' : 'Off'); });
           box.querySelectorAll('[data-holiday]').forEach(b => { const on = !!(roomSettings.holidays || {})[b.dataset.holiday]; paint(b, on, on ? 'On' : 'Off'); });
           box.querySelector('#holiday-preview').value = roomSettings.holidayPreview || 'auto';
+          box.querySelectorAll('[data-fire-row]').forEach(r => r.classList.toggle('hidden', !roomSettings.fireplace));
           ui.status();
         };
         ui.status = () => {
@@ -3726,12 +3813,23 @@
         box.addEventListener('click', (e) => {
           const fr = e.target.closest('[data-frame]'), tg = e.target.closest('[data-dtoggle]'), hb = e.target.closest('[data-holiday]');
           if (fr) { roomSettings.frameStyle = fr.dataset.frame; saveRoom(); buildWalls(); ui.sync(); }
-          else if (tg) { roomSettings[tg.dataset.dtoggle] = !roomSettings[tg.dataset.dtoggle]; saveRoom(); buildExtras(); ui.sync(); }
+          else if (tg) {
+            const k = tg.dataset.dtoggle;
+            roomSettings[k] = !roomSettings[k]; saveRoom();
+            if (k === 'fireplace') { buildFire(); buildHoliday(true); }   // stockings move to the mantel at Christmas
+            else if (k === 'fireLit') setFireVisible();
+            else buildExtras();
+            ui.sync();
+          }
           else if (hb) { roomSettings.holidays = Object.assign({}, roomSettings.holidays, { [hb.dataset.holiday]: !(roomSettings.holidays || {})[hb.dataset.holiday] }); saveRoom(); buildHoliday(true); ui.sync(); }
         });
         // the windows toggle hides the two back-wall spots; the reset button clears everything
         panel.addEventListener('click', (e) => {
           if (e.target.closest('[data-toggle="window"]')) setTimeout(buildWalls, 0);
+          const moodBtn = e.target.closest('[data-key="mood"][data-val="fireside"]');
+          if (moodBtn && !(roomSettings.fireplace && roomSettings.fireLit)) {          // Fireside needs a fire
+            roomSettings.fireplace = true; roomSettings.fireLit = true; saveRoom(); buildFire(); buildHoliday(true); ui.sync();
+          }
           if (e.target.closest('#room-reset')) setTimeout(refresh, 0);
         });
         window.addEventListener('room-restored', refresh);
