@@ -155,6 +155,11 @@
           <span id="hold-text">Pick Up Book</span>
         </button>
 
+        <button id="btn-zoom" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center space-x-1.5 border border-slate-700">
+          <i class="fa-solid fa-magnifying-glass-plus text-amber-400"></i>
+          <span>Zoom in</span>
+        </button>
+
         <button id="btn-put-back" class="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center space-x-1.5 border border-slate-700">
           <i class="fa-solid fa-arrow-left text-amber-400"></i>
           <span>Return Book to Shelf</span>
@@ -2286,6 +2291,7 @@
      */
     function centerBook() {
       if (!isBookOnTable || !currentActiveBook || isHeld) return;
+      zoomOut(true);
       gsap.to(currentActiveBook.position, {
         x: bookCenterX(isBookOpen),
         y: BOOK_REST_Y,
@@ -2476,6 +2482,7 @@
 
     function toggleBookOpen(shouldOpen = !isBookOpen, onDone = null) {
       if (!currentActiveBook || isAnimating) return;
+      if (zoomSide && !shouldOpen) zoomOut();
       isAnimating = true;
 
       const book = currentActiveBook;
@@ -2584,6 +2591,51 @@
         });
       }
     }
+
+    /* ---------- Zoom in on one page of the open book ---------- */
+    let zoomSide = null;                                   // null | 'left' | 'right'
+    const zoomBtn = document.getElementById('btn-zoom');
+    const readingFov = () => isSeated ? Math.max(SEAT_FOV, STAND_FOV) : STAND_FOV;
+    const PAGE_CX = 0.02 + (BOOK_WIDTH - 0.05) / 2;
+    const leftPageOK = () => currentSpreadIndex > 0;
+    const rightPageOK = () => !!currentActiveBook && currentSpreadIndex < currentActiveBook.userData.pageLeaves.length;
+    function updateZoomUI() {
+      zoomBtn.querySelector('span').textContent = zoomSide ? 'Zoom out' : 'Zoom in';
+      zoomBtn.querySelector('i').className = 'fa-solid ' + (zoomSide ? 'fa-magnifying-glass-minus' : 'fa-magnifying-glass-plus') + ' text-amber-400';
+      if (currentActiveBook) document.getElementById('view-status-text').innerText = zoomSide
+        ? 'Zoomed in: tap the right side of the screen for the next page, the left side to go back'
+        : `Reading: "${currentActiveBook.userData.data.title}"`;
+    }
+    function zoomTo(side) {
+      if (!currentActiveBook || !isBookOpen || isHeld) return;
+      zoomSide = side; updateZoomUI();
+      const c = currentActiveBook.localToWorld(new THREE.Vector3(side === 'left' ? -PAGE_CX : PAGE_CX, 0, 0));
+      const fov = readingFov(), T = Math.tan(fov * Math.PI / 360), a = camera.aspect;
+      const d = Math.max(0.6, ((BOOK_HEIGHT - 0.07) * 1.12) / (2 * T), ((BOOK_WIDTH - 0.05) * 1.08) / (2 * T * a));
+      const pos = c.clone().addScaledVector(new THREE.Vector3(0, 1, 0.45).normalize(), d);   // nearly overhead
+      if (isSeated) freeSeatLimits();
+      tweenView(pos, headTarget(pos, c), fov, 0.7);
+    }
+    function zoomOut(quick) {
+      if (!zoomSide) return;
+      zoomSide = null; updateZoomUI();
+      if (quick) return;                                   // something else is moving the camera
+      tweenView(CAMERA_TABLE_POS, CAMERA_TABLE_LOOK, readingFov(), 0.7, () => { if (isSeated) setSeatLimits(); });
+    }
+    function zoomIn() { if (isBookOpen && !isHeld) zoomTo(leftPageOK() ? 'left' : 'right'); }
+    function zoomForward() {
+      if (isAnimating || !currentActiveBook) return;
+      if (zoomSide === 'left' && rightPageOK()) return zoomTo('right');
+      if (currentSpreadIndex < currentActiveBook.userData.pageLeaves.length) { turnPage('next'); zoomTo('left'); }
+      else zoomOut();
+    }
+    function zoomBack() {
+      if (isAnimating || !currentActiveBook) return;
+      if (zoomSide === 'right' && leftPageOK()) return zoomTo('left');
+      if (currentSpreadIndex > 0) { turnPage('prev'); zoomTo('right'); }
+      else zoomOut();
+    }
+    zoomBtn.addEventListener('click', () => { if (zoomSide) zoomOut(); else zoomIn(); });
 
     function updatePageCounterUI() {
       const counter = document.getElementById('page-counter');
@@ -2703,6 +2755,11 @@
           sitDown();           // tapped the chair
         }
       } else if (currentActiveBook) {
+        if (zoomSide) {
+          const r = renderer.domElement.getBoundingClientRect();
+          if (clientX - r.left > r.width / 2) zoomForward(); else zoomBack();
+          return;
+        }
         // Tap the book on the table to open/close it
         const hits = raycaster.intersectObject(currentActiveBook, true);
         if (hits.length > 0) {
@@ -3066,7 +3123,7 @@
       // If the book on the table was edited, bring the updated copy back to the table
       if (wasOnTable) {
         const updatedBook = interactiveBooks.find(b => b.userData.data.id === savedId);
-        isBookOnTable = false; isBookOpen = false; currentSpreadIndex = 0; currentActiveBook = null; isHeld = false; holdProxy.v = 0;
+        isBookOnTable = false; isBookOpen = false; currentSpreadIndex = 0; currentActiveBook = null; isHeld = false; holdProxy.v = 0; zoomSide = null;
         document.getElementById('btn-toggle-book-text').innerText = 'Open Book';
         if (updatedBook) moveBookToTable(updatedBook); else resetReadingState();
       }
@@ -3074,6 +3131,7 @@
 
     // Leave reading mode (used if the book on the table no longer exists)
     function resetReadingState() {
+      zoomSide = null;
       isBookOnTable = false; isBookOpen = false; currentSpreadIndex = 0; currentActiveBook = null; isHeld = false; holdProxy.v = 0;
       document.getElementById('reading-controls').classList.add('hidden');
       document.getElementById('header-actions').classList.remove('hidden');
@@ -3103,8 +3161,9 @@
       if (e.key === 'c' || e.key === 'C') centerBook();
       if (!isBookOnTable) return;
       if (e.key === 'Escape') { returnBookToShelf(); return; }
-      if (e.key === 'ArrowRight') { if (!isBookOpen) toggleBookOpen(true); else turnPage('next'); }
-      if (e.key === 'ArrowLeft') turnPage('prev');
+      if (e.key === 'ArrowRight') { if (!isBookOpen) toggleBookOpen(true); else if (zoomSide) zoomForward(); else turnPage('next'); }
+      if (e.key === 'ArrowLeft') { if (zoomSide) zoomBack(); else turnPage('prev'); }
+      if (e.key === 'z' || e.key === 'Z') { if (zoomSide) zoomOut(); else zoomIn(); }
     });
     document.getElementById('btn-toggle-book').addEventListener('click', () => toggleBookOpen());
     document.getElementById('btn-next-page').addEventListener('click', () => turnPage('next'));
@@ -3527,6 +3586,7 @@
 
     function pickUpBook() {
       if (!isSeated || !isBookOnTable || !currentActiveBook || isAnimating || isHeld) return;
+      zoomOut();
       isHeld = true; heldX = currentActiveBook.position.x;
       holdText.innerText = 'Put Down';
       gsap.to(holdProxy, { v: 1, duration: 0.9, ease: 'power2.inOut' });
@@ -3546,6 +3606,8 @@
 
     // Runs every frame: keeps the held book in front of your eyes, facing you, wherever you look
     function updateHeldBook() {
+      const showZoom = isBookOnTable && isBookOpen && !isHeld;
+      if (zoomBtn.classList.contains('hidden') === showZoom) zoomBtn.classList.toggle('hidden', !showZoom);
       const showShelfBtn = isSeated && !isBookOnTable;
       if (shelfLookBtn.classList.contains('hidden') === showShelfBtn) shelfLookBtn.classList.toggle('hidden', !showShelfBtn);
       const show = isSeated && isBookOnTable && !!currentActiveBook;
@@ -4597,8 +4659,8 @@
     // Standing views, fitted to the screen: the whole shelf, and the open book on the table.
     // Narrow (portrait) screens get a wider lens so the view isn't a thin slice.
     let STAND_FOV = 45;
-    const SHELF_FOCUS = new THREE.Vector3(0, 1.75, 0.3), SHELF_DIR = new THREE.Vector3(0, 0.25, 1).normalize();
-    const TABLE_FOCUS = new THREE.Vector3(0, -0.6, 0.8), TABLE_DIR = new THREE.Vector3(0, 4.3, 2.2).normalize();
+    const SHELF_FOCUS = new THREE.Vector3(0, 2.25, 0.3), STAND_EYE_Y = 1.4;   // look slightly up at the shelf from standing eye height
+    const TABLE_FOCUS = new THREE.Vector3(0, -0.6, 0.8), TABLE_DIR = new THREE.Vector3(0, 3.4, 2.7).normalize();
     const headTarget = (pos, focus) => pos.clone().addScaledVector(focus.clone().sub(pos).normalize(), 0.05);
     function updateViewFits() {
       const a = camera.aspect;
@@ -4606,8 +4668,8 @@
       STAND_FOV = 2 * Math.atan(T) * 180 / Math.PI;
       const Th = T * a;
       // shelf: whole bookcase (about 5.2 wide, 0.9 to 3.6 high) with a margin; never past the doorway wall
-      const dShelf = Math.min(12.5, Math.max(6.4, 2.9 / Th, 2.05 / T));
-      const shelfPos = SHELF_FOCUS.clone().addScaledVector(SHELF_DIR, dShelf);
+      const dShelf = Math.min(12.2, Math.max(6.2, 2.9 / Th, 1.6 / T));        // how far back to stand
+      const shelfPos = new THREE.Vector3(0, STAND_EYE_Y, SHELF_FOCUS.z + dShelf);
       // table: the open book with a margin; stay under the ceiling
       const dTable = Math.min(8, Math.max(4.83, (BOOK_WIDTH * 2 + 0.5) / (2 * Th), (BOOK_HEIGHT + 0.6) / (2 * T * 0.55)));
       const tablePos = TABLE_FOCUS.clone().addScaledVector(TABLE_DIR, dTable);
