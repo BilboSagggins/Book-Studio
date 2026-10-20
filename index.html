@@ -655,6 +655,29 @@
         return texture;
       },
 
+      // Title page (first right-hand page) or closing page (last left-hand page)
+      createTitlePageTexture(book, closing = false) {
+        const W = 512, H = 680, c = document.createElement('canvas'); c.width = W; c.height = H;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#eee3c6'; ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = 'rgba(217, 119, 6, 0.15)'; ctx.lineWidth = 2; ctx.strokeRect(25, 25, W - 50, H - 50);
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        if (closing) {
+          ctx.fillStyle = '#6b5b45'; ctx.font = "60px sans-serif"; ctx.fillText('✨', W / 2, H / 2 - 30);
+          ctx.font = "italic 24px Georgia, serif"; ctx.fillText('Thanks for reading!', W / 2, H / 2 + 40);
+        } else {
+          ctx.font = "100px sans-serif"; ctx.fillText(book.emoji || '📖', W / 2, 200);
+          ctx.fillStyle = '#16100a'; ctx.font = "bold 36px 'Fredoka', 'Quicksand', sans-serif";
+          const words = String(book.title || 'Untitled').split(' '); let line = '', y = 340; const lines = [];
+          words.forEach(w => { const t = line + w + ' '; if (ctx.measureText(t).width > 400 && line) { lines.push(line.trim()); line = w + ' '; } else line = t; });
+          lines.push(line.trim());
+          lines.forEach((l, i) => ctx.fillText(l, W / 2, y + i * 46));
+          ctx.fillStyle = '#6b5b45'; ctx.font = "600 22px 'Quicksand', sans-serif";
+          ctx.fillText('by ' + (book.author || 'Unknown'), W / 2, y + lines.length * 46 + 30);
+        }
+        const t = new THREE.CanvasTexture(c); t.needsUpdate = true; return t;
+      },
+
       // Inner Book Pages Texture (optional picture; layout 'above' or 'full'; textBg 'plain' or 'direct')
       createPageTexture(text, emoji, pageNum, isRightPage = false, opts = {}) {
         const W = 512, H = 680;
@@ -2053,35 +2076,35 @@
       const pageLeaves = [];
       const numSpreads = bookData.pages.length;
 
-      for (let i = 0; i < numSpreads; i++) {
+      // When the book lies open you see the BACK of the last turned sheet on the left and the
+      // FRONT of the next sheet on the right. So for spread i to face itself, sheet i carries the
+      // left page of spread i on its back and the right page of spread i-1 on its front.
+      // Sheet 0's front is a title page; the last sheet's back is a closing page.
+      const pageTone = roomSettings.pageBrightness;
+      const pageMat = (tex) => {
+        tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 8;
+        const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 1, metalness: 0, envMapIntensity: 0, color: new THREE.Color().setScalar(pageTone) });
+        pageMats.push(m); return m;
+      };
+      const leftMats = [], rightMats = [];
+      bookData.pages.forEach((pageData, i) => {
+        leftMats.push(pageMat(TextureGenerator.createPageTexture(pageData.leftText, pageData.leftEmoji, (i * 2) + 1, false, { image: pageData.leftImage, layout: pageData.leftLayout, textBg: pageData.leftTextBg })));
+        rightMats.push(pageMat(TextureGenerator.createPageTexture(pageData.rightText, pageData.rightEmoji, (i * 2) + 2, true, { image: pageData.rightImage, layout: pageData.rightLayout, textBg: pageData.rightTextBg })));
+      });
+      const titleMat = pageMat(TextureGenerator.createTitlePageTexture(bookData));
+      const closingMat = pageMat(TextureGenerator.createTitlePageTexture(bookData, true));
+
+      for (let i = 0; i <= numSpreads; i++) {
         const pagePivot = new THREE.Group();
-        pagePivot.position.set(0, 0, 0);
-
-        const pageData = bookData.pages[i];
-        const leftTex = TextureGenerator.createPageTexture(pageData.leftText, pageData.leftEmoji, (i * 2) + 1, false, { image: pageData.leftImage, layout: pageData.leftLayout, textBg: pageData.leftTextBg });
-        const rightTex = TextureGenerator.createPageTexture(pageData.rightText, pageData.rightEmoji, (i * 2) + 2, true, { image: pageData.rightImage, layout: pageData.rightLayout, textBg: pageData.rightTextBg });
-
-        leftTex.encoding = rightTex.encoding = THREE.sRGBEncoding;
-        leftTex.anisotropy = rightTex.anisotropy = 8;
-        const pageTone = roomSettings.pageBrightness;
-        const leftMat = new THREE.MeshStandardMaterial({ map: leftTex, roughness: 1, metalness: 0, envMapIntensity: 0, color: new THREE.Color().setScalar(pageTone) });
-        const rightMat = new THREE.MeshStandardMaterial({ map: rightTex, roughness: 1, metalness: 0, envMapIntensity: 0, color: new THREE.Color().setScalar(pageTone) });
-        pageMats.push(leftMat, rightMat);
-
-        // Leaf geometry: Right side = rightTex (+z), Left side = leftTex (-z)
-        const leafMaterials = [
-          innerPaperMat, innerPaperMat, innerPaperMat, innerPaperMat,
-          rightMat, leftMat
-        ];
-
+        const front = i === 0 ? titleMat : rightMats[i - 1];          // +z: seen on the right before turning
+        const back = i < numSpreads ? leftMats[i] : closingMat;       // -z: seen on the left after turning
         const leafMesh = new THREE.Mesh(
           new THREE.BoxGeometry(BOOK_WIDTH - 0.05, BOOK_HEIGHT - 0.07, 0.008),
-          leafMaterials
+          [innerPaperMat, innerPaperMat, innerPaperMat, innerPaperMat, front, back]
         );
         leafMesh.position.set(0.02 + (BOOK_WIDTH - 0.05) / 2, 0, 0);
         leafMesh.castShadow = true;
         pagePivot.add(leafMesh);
-
         bookGroup.add(pagePivot);
         pageLeaves.push(pagePivot);
       }
@@ -2464,8 +2487,10 @@
         counter.innerText = "Closed";
         return;
       }
-      const totalSpreads = currentActiveBook.userData.pageLeaves.length;
-      counter.innerText = `Spread ${currentSpreadIndex + 1} / ${totalSpreads}`;
+      const totalSpreads = currentActiveBook.userData.pageLeaves.length - 1;   // first view is the title page
+      if (currentSpreadIndex === 0) counter.innerText = 'Title page';
+      else if (currentSpreadIndex > totalSpreads) counter.innerText = 'The End';
+      else counter.innerText = `Pages ${currentSpreadIndex * 2 - 1}–${currentSpreadIndex * 2} of ${totalSpreads * 2}`;
     }
 
     /* =========================================================================
