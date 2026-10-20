@@ -2564,6 +2564,7 @@
           }
           isAnimating = false;
           if (onDone) onDone();
+          else if (isBookOpen && isSeated && !isHeld && !zoomSide) zoomIn();   // seated: look straight at the first page
         }
       });
 
@@ -2666,10 +2667,33 @@
         ? 'Zoomed in: tap the right side of the screen for the next page, the left side to go back'
         : `Reading: "${currentActiveBook.userData.data.title}"`;
     }
+    // Narrowest view (field of view) from `pos` that still shows all four page corners
+    const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3();
+    function fovToFit(pos, target, corners) {
+      _m4.lookAt(pos, target, camera.up); _q.setFromRotationMatrix(_m4).invert();
+      let T = 0;
+      corners.forEach(cn => {
+        _v.copy(cn).sub(pos).applyQuaternion(_q);           // into the camera's own directions
+        const zz = Math.max(0.01, -_v.z);
+        T = Math.max(T, Math.abs(_v.y) / zz, Math.abs(_v.x) / (zz * camera.aspect));
+      });
+      return Math.min(75, Math.max(10, 2 * Math.atan(T * 1.08) * 180 / Math.PI));
+    }
+    function pageCorners(side) {
+      const w = BOOK_WIDTH - 0.05, h = (BOOK_HEIGHT - 0.07) / 2, x0 = side === 'left' ? -0.02 - w : 0.02, x1 = x0 + w;
+      return [[x0, -h], [x1, -h], [x0, h], [x1, h]].map(([x, y]) => currentActiveBook.localToWorld(new THREE.Vector3(x, y, 0)));
+    }
     function zoomTo(side) {
       if (!currentActiveBook || !isBookOpen || isHeld) return;
       zoomSide = side; updateZoomUI();
       const c = currentActiveBook.localToWorld(new THREE.Vector3(side === 'left' ? -PAGE_CX : PAGE_CX, 0, 0));
+      if (isSeated) {
+        // stay in the chair: lean in a little, turn your head to the page, and focus (narrow the view) on it
+        const pos = new THREE.Vector3(c.x * 0.25, 0.6, 2.25);
+        freeSeatLimits();
+        tweenView(pos, headTarget(pos, c), fovToFit(pos, c, pageCorners(side)), 0.8);
+        return;
+      }
       const fov = readingFov(), T = Math.tan(fov * Math.PI / 360), a = camera.aspect;
       const d = Math.max(0.6, ((BOOK_HEIGHT - 0.07) * 1.12) / (2 * T), ((BOOK_WIDTH - 0.05) * 1.08) / (2 * T * a));
       const pos = c.clone().addScaledVector(new THREE.Vector3(0, 1, 0.45).normalize(), d);   // nearly overhead
