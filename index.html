@@ -2311,6 +2311,7 @@
       isBookOnTable = true;
       bookGroup.userData.hitBox.raycast = () => {};
       bookGroup.userData.setPageWindow(0);
+      if (lookingAtShelf) { setShelfLook(false, true); freeSeatLimits(); gsap.to(camera, { fov: Math.max(SEAT_FOV, STAND_FOV), duration: 1.2, onUpdate: () => camera.updateProjectionMatrix(), onComplete: setSeatLimits }); }
 
       const data = bookGroup.userData.data;
       
@@ -3417,9 +3418,55 @@
     const SEAT_TARGET = SEAT_POS.clone().addScaledVector(SEAT_LOOK.clone().sub(SEAT_POS).normalize(), 0.05);
     let isSeated = false;
     const standBtn = document.createElement('button');
-    standBtn.className = 'hidden fixed z-30 bottom-6 left-4 glass-panel text-slate-200 hover:bg-slate-700/50 px-4 py-2.5 rounded-xl text-sm font-semibold shadow-lg flex items-center gap-2';
+    const seatBar = document.createElement('div');
+    seatBar.className = 'fixed z-30 bottom-6 left-4 flex gap-2';
+    document.body.appendChild(seatBar);
+    standBtn.className = 'hidden glass-panel text-slate-200 hover:bg-slate-700/50 px-4 py-2.5 rounded-xl text-sm font-semibold shadow-lg flex items-center gap-2';
     standBtn.innerHTML = '<i class="fa-solid fa-person-walking text-amber-400"></i><span>Stand up</span>';
-    document.body.appendChild(standBtn);
+    seatBar.appendChild(standBtn);
+    const shelfLookBtn = document.createElement('button');
+    shelfLookBtn.className = 'hidden glass-panel text-slate-200 hover:bg-slate-700/50 px-4 py-2.5 rounded-xl text-sm font-semibold shadow-lg flex items-center gap-2';
+    shelfLookBtn.innerHTML = '<i class="fa-solid fa-book text-amber-400"></i><span>Look at shelf</span>';
+    seatBar.appendChild(shelfLookBtn);
+    let lookingAtShelf = false;
+
+    // Seated "look up at the shelf": aim at the bookcase and widen the lens so all of it fits.
+    // If the screen is too narrow for that from the chair, lean back just far enough.
+    const SHELF_CENTER = new THREE.Vector3(0, 2.2, 0.35);
+    function shelfLookView() {
+      const a = camera.aspect, halfW = 2.75, halfH = 1.5, Tmax = Math.tan(40 * Math.PI / 180);
+      const dz0 = SEAT_POS.z - SHELF_CENTER.z;
+      let pos = SEAT_POS.clone(), d = pos.distanceTo(SHELF_CENTER);
+      let need = Math.max(halfH / d, halfW / (d * a));
+      if (need > Tmax) {                                     // lean back (staying at about eye height)
+        const dz = Math.min(12 - SHELF_CENTER.z, Math.max(dz0, halfH / Tmax, halfW / (Tmax * a)));
+        pos = new THREE.Vector3(0, 0.9, SHELF_CENTER.z + dz);
+        d = pos.distanceTo(SHELF_CENTER);
+        need = Math.max(halfH / d, halfW / (d * a));
+      }
+      const fov = Math.min(80, Math.max(45, 2 * Math.atan(need * 1.06) * 180 / Math.PI));
+      return { pos, look: headTarget(pos, SHELF_CENTER), fov };
+    }
+    function setSeatLimits() {
+      const az = controls.getAzimuthalAngle();
+      controls.minAzimuthAngle = az - 0.9; controls.maxAzimuthAngle = az + 0.9;
+      controls.minPolarAngle = Math.PI / 2 - 0.75; controls.maxPolarAngle = Math.PI / 2 + 0.55;
+      controls.rotateSpeed = 0.45;
+    }
+    function freeSeatLimits() {
+      controls.minAzimuthAngle = -Infinity; controls.maxAzimuthAngle = Infinity; controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI;
+    }
+    function setShelfLook(on, quick) {
+      if (on === lookingAtShelf || !isSeated) return;
+      lookingAtShelf = on;
+      shelfLookBtn.querySelector('span').textContent = on ? 'Look at desk' : 'Look at shelf';
+      shelfLookBtn.querySelector('i').className = on ? 'fa-solid fa-chair text-amber-400' : 'fa-solid fa-book text-amber-400';
+      if (quick) return;                                     // something else is moving the camera
+      freeSeatLimits();
+      const v = on ? shelfLookView() : { pos: SEAT_POS, look: SEAT_TARGET, fov: Math.max(SEAT_FOV, STAND_FOV) };
+      tweenView(v.pos, v.look, v.fov, 1.1, setSeatLimits);
+    }
+    shelfLookBtn.addEventListener('click', () => setShelfLook(!lookingAtShelf));
 
     function tweenView(pos, look, fov, dur, done) {
       gsap.to(camera.position, { x: pos.x, y: pos.y, z: pos.z, duration: dur, ease: 'power2.inOut' });
@@ -3446,6 +3493,7 @@
     }
     function standUp() {
       if (!isSeated) return;
+      setShelfLook(false, true);
       if (isHeld) putDownBook();
       isSeated = false;
       CAMERA_SHELF_POS.copy(STAND_VIEW.shelfPos); CAMERA_SHELF_LOOK.copy(STAND_VIEW.shelfLook);
@@ -3498,6 +3546,8 @@
 
     // Runs every frame: keeps the held book in front of your eyes, facing you, wherever you look
     function updateHeldBook() {
+      const showShelfBtn = isSeated && !isBookOnTable;
+      if (shelfLookBtn.classList.contains('hidden') === showShelfBtn) shelfLookBtn.classList.toggle('hidden', !showShelfBtn);
       const show = isSeated && isBookOnTable && !!currentActiveBook;
       if (show !== holdBtnShown) { holdBtnShown = show; holdBtn.classList.toggle('hidden', !show); }
       if (!currentActiveBook || (!isHeld && holdProxy.v <= 0)) return;
